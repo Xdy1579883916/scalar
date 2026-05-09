@@ -10,12 +10,8 @@ import cssInjectedByJsPlugin from 'vite-plugin-css-injected-by-js'
 import { name, version } from './package.json'
 
 const licenseBannerTemplate = String.raw`/**
- *    _____ _________    __    ___    ____
- *   / ___// ____/   |  / /   /   |  / __ \
- *   \__ \/ /   / /| | / /   / /| | / /_/ /
- *  ___/ / /___/ ___ |/ /___/ ___ |/ _, _/
- * /____/\____/_/  |_/_____/_/  |_/_/ |_|
- *
+ *  Scalar
+ 
  * {{ packageName }} {{ version }}
  *
  * Website: https://scalar.com
@@ -70,10 +66,23 @@ export default defineConfig({
       // @scalar/components barrel via @scalar/api-client but are never mounted.
       external: [/^radix-vue/, /^@scalar\/openapi-parser/],
       output: {
-        entryFileNames: '[name].js',
+        entryFileNames: `[name]-${version}.js`,
         globals: {
           'radix-vue': '{}',
           'radix-vue/namespaced': '{}',
+        },
+        minify: {
+          compress: {
+            dropConsole: true,
+            dropDebugger: true,
+            unused: true,
+            treeshake: {
+              annotations: false,
+            },
+          },
+          codegen: {
+            removeWhitespace: true,
+          },
         },
       },
     },

@@ -226,7 +226,7 @@ const handleUpdateRow = (
         :max="maximumValue"
         :min="minimumValue"
         :modelValue="displayValue"
-        placeholder="Value"
+        :placeholder="data.description || 'Value'"
         :type="typeValue"
         withFakeData
         @navigate="(route) => emit('navigate', route)"

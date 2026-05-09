@@ -1107,6 +1107,7 @@ const showMCPButton = computed(() => {
                     :isDevelopment="isDevelopment"
                     :url="documentUrl"
                     :workspace="workspaceStore" />
+                  <div />
                   <!-- Override the dark mode toggle slot to hide it -->
                   <template #toggle>
                     <ScalarColorModeToggleButton
