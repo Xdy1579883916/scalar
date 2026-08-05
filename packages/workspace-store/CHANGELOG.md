@@ -1,5 +1,299 @@
 # @scalar/workspace-store
 
+## 0.56.0
+
+### Minor Changes
+
+- [#9726](https://github.com/scalar/scalar/pull/9726): feat: add a switchable form view for JSON and YAML request bodies
+
+  When a request body's content type is JSON or YAML and its schema (or the current example) describes an object, a "Form / Raw" toggle now appears next to the content type selector. The form view renders one row per schema property — with enum dropdowns, required badges, defaults, and per-field validation, matching the existing `multipart/form-data` editor — and folds edits back into a nested object using the schema's declared types (numbers, booleans, arrays, and nested objects survive the round-trip instead of becoming strings). The raw code editor remains the default and is unaffected for non-object bodies or unparseable text.
+
+  `@scalar/workspace-store` gains reusable exports for this: `buildDottedNestedRowPredicate`, `coerceLeafValueToSchemaType`, `coerceUntypedValue`, and `resolveLeafSchema` from `@scalar/workspace-store/request-example`, factored out of the existing multipart request-body builder.
+
+### Patch Changes
+
+- [#9732](https://github.com/scalar/scalar/pull/9732): Render every `oneOf`/`anyOf` group of an `allOf` in place. Previously, when one object composed several mutually-exclusive choices as sibling `oneOf`/`anyOf` under `allOf`, only the first group was shown and the rest were silently dropped. Each choice group now renders its own selector in the position it was declared, and the generated request example stays in sync per group.
+- [#9767](https://github.com/scalar/scalar/pull/9767): fix: honor document level `x-scalar-secret-*` extensions on apiKey and http security schemes
+
+  OAuth flows already read their secrets from the OpenAPI document, but the apiKey and http branches only looked at the auth store and at the config input fields (`value`, `token`, `username`, `password`). A token declared as `x-scalar-secret-token` directly on the security scheme was therefore ignored, and the request kept rendering the `YOUR_SECRET_TOKEN` placeholder. Both branches now follow the same precedence as the OAuth flows: auth store, then the document extension, then the config field.
+
+- [#9697](https://github.com/scalar/scalar/pull/9697): Add credential input UIs for the AsyncAPI broker-specific security scheme types, which previously showed a "not supported yet" message in the Authentication selector. The SASL-style schemes (`userPassword`, `plain`, `scramSha256`, `scramSha512`) get a username + password form like HTTP basic, `X509` gets client certificate + private key (PEM) inputs, `symmetricEncryption`/`asymmetricEncryption` get a single key input, and `gssapi` gets a service name input. The entered credentials are persisted in the auth store with new type-specific secret shapes (`x-scalar-secret-client-certificate`, `x-scalar-secret-private-key`, `x-scalar-secret-service-name`, plus the existing username/password/token extensions) and round-trip through the merged scheme objects the same way as the OpenAPI types. The Galaxy AsyncAPI sample document now defines one scheme of each broker group so the inputs can be exercised.
+- [#9594](https://github.com/scalar/scalar/pull/9594): Fix OAuth2 scope checkboxes losing selections on quick clicks. Each scope is now toggled against the stored selection instead of a list computed in the component, so the "Scopes Selected" counter and the scopes sent to the token endpoint stay in sync with the checkboxes.
+- [#9802](https://github.com/scalar/scalar/pull/9802): Let callers supply their own Schema Object schema to `generateSchema`
+
+  The Schema Object subtree is now built by an exported `generateSchemaObject`, and `generateSchema` accepts a Schema Object through a `schemaObject` option. Passing nothing keeps the previous behavior exactly — the generated OpenAPI types are unchanged.
+
+  This gives consumers a way to change how schemas are represented without the workspace store carrying a flag for each variation. One case it enables: every branch of the default Schema Object union keys off `type`, so a schema without one — `{}`, or one carrying only annotations — is not a member of the type even though OpenAPI 3.1 allows it and reads it as "any JSON value". Coercion cannot report that, so it substitutes the internal `__scalar_` marker, and `false` under `additionalProperties`, which inverts "any additional property is allowed" into "none are". A caller that needs those schemas preserved can now supply a Schema Object that represents them.
+
+## 0.55.6
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.55.5
+
+## 0.55.4
+
+### Patch Changes
+
+- [#9618](https://github.com/scalar/scalar/pull/9618): Render document-wide authentication for AsyncAPI documents. The introduction now shows the same Authentication selector used for OpenAPI, populated from `components.securitySchemes`, with requirements derived from the union of every server's `security` (AsyncAPI has no root-level `security`). When some servers require auth and others accept unauthenticated connections, a no-auth option is offered too. Schemes shared with OpenAPI (`http`, `oauth2`, `openIdConnect`, `apiKey`) get full input UI, and AsyncAPI OAuth2 `availableScopes` are mapped onto OpenAPI `scopes` so the scope list renders. Broker-specific types still appear in the selector but have no dedicated input yet. The selector is now fully interactive for AsyncAPI (selecting schemes, entering credentials, editing scopes) because the auth mutators accept AsyncAPI documents. Operation/channel-level auth is intentionally left for a follow-up.
+
+## 0.55.3
+
+### Patch Changes
+
+- [#9652](https://github.com/scalar/scalar/pull/9652): Keep JSON Schema 2020-12 reference keywords (`$id`, `$anchor`, `$dynamicAnchor`, `$dynamicRef`, `$defs`) on an inline schema `$ref` during bundling. A generic template like `Paginated<T>` binds its item type through a `$defs`/`$dynamicAnchor` sibling next to the `$ref`, and that wrapper can appear inline on a response schema rather than under `components/schemas`. The normalization step previously stripped every sibling except `$ref` outside `components/schemas`, discarding the binding so `$dynamicRef` resolved to the template's empty fallback and the generated example rendered an empty array (for example the `data` array of `GET /planets` in the Scalar Galaxy).
+
+## 0.55.2
+
+## 0.55.1
+
+### Patch Changes
+
+- [#9616](https://github.com/scalar/scalar/pull/9616): Run the AsyncAPI upgrader when ingesting AsyncAPI documents so 1.x/2.x specs are converted to the 3.x shape the renderer expects. Previously a 2.x document (operations nested under channels as `publish`/`subscribe`) was passed through unchanged, leaving `operations` empty and dropping every channel from the navigation — the document rendered blank. The original version is preserved on `x-original-aas-version`.
+- [#9468](https://github.com/scalar/scalar/pull/9468): Preserve keywords declared alongside a `$ref` when deeply resolving references, so a `$defs`/`$dynamicAnchor` binding (the `Paginated<T>` pattern) survives and `$dynamicRef` can resolve to the bound item type instead of falling back to an empty result
+- [#9483](https://github.com/scalar/scalar/pull/9483): Keep JSON Schema 2020-12 reference keywords (`$id`, `$anchor`, `$dynamicAnchor`, `$dynamicRef`) on Schema Objects when coercing documents during ingestion, so generic templates like `PaginatedResponse<T>` keep their dynamic item binding instead of having it dropped for schemas reachable from an operation
+
+## 0.55.0
+
+### Minor Changes
+
+- [#9568](https://github.com/scalar/scalar/pull/9568): Add AsyncAPI protocol and server pickers to the sidebar (like the multi-document picker) that filter the navigation down to the operations reachable over the selected protocol/server
+- [#8519](https://github.com/scalar/scalar/pull/8519): refactor: extract the code example block into `@scalar/blocks/code-example`. `api-client`, `api-client-react`, and `api-reference` now import `CodeExample`, `findClient`, `generateClientOptions`, and the related helpers from the new package. `workspace-store` exports `isParamDisabled` with an optional `defaultDisabled` argument.
+
+  **Breaking (`@scalar/api-client`):** the `@scalar/api-client/blocks/operation-code-sample` and `@scalar/api-client/v2/blocks/operation-code-sample` export paths have been removed. Import from `@scalar/blocks/code-example` instead, and use the renamed `CodeExample` / `CodeExampleProps` (previously `OperationCodeSample` / `OperationCodeSampleProps`).
+
+- [#9543](https://github.com/scalar/scalar/pull/9543): Add the `x-scalar-links` OpenAPI extension to render extra named links (like a privacy policy or imprint) next to the contact, license and terms of service links in the introduction.
+
+### Patch Changes
+
+- [#9583](https://github.com/scalar/scalar/pull/9583): Serialize array values inside `deepObject` query parameters with the trailing bracket convention (`filter[ids][]=1&filter[ids][]=2`) instead of collapsing them into a single comma-joined value
+- [#9548](https://github.com/scalar/scalar/pull/9548): Keep request and response example pickers in sync across operations. Selecting an example (e.g. "Use case 1") now selects the example with the same key on every other operation that defines it, mirroring how the programming-language selection already syncs. Operations that do not have a matching example keep their current selection.
+
+## 0.54.5
+
+### Patch Changes
+
+- [#9549](https://github.com/scalar/scalar/pull/9549): Preserve `$ref` reference objects when coercing schemas, so unresolved chunk references (from the server-side workspace store) survive instead of being dropped. This is a prerequisite for resolving lazily-loaded chunks transitively (an operation chunk can now reference component chunks).
+
+## 0.54.4
+
+### Patch Changes
+
+- [#9465](https://github.com/scalar/scalar/pull/9465): Resolve JSON Schema 2020-12 `$dynamicRef` against the active `$dynamicAnchor` when generating examples, so generic patterns like `PaginatedResponse<T>` and recursive trees produce concrete example data instead of empty placeholders
+- [#9494](https://github.com/scalar/scalar/pull/9494): Preserve document-level UI settings (watch mode, selected server, environments, sidebar order) and user-configured servers across `rebaseDocument` — previously every rebase (e.g. a watch mode pull) silently wiped them
+
+## 0.54.3
+
+### Patch Changes
+
+- [#9446](https://github.com/scalar/scalar/pull/9446): Fix `anyOf`/`oneOf` array query parameters (e.g. `Optional[List[str]]`) being sent as a single string instead of repeated query parameters
+- [#9480](https://github.com/scalar/scalar/pull/9480): Do not send a Basic `Authorization` header when both the username and password are empty, instead of falling back to a `username:password` placeholder
+- [#9342](https://github.com/scalar/scalar/pull/9342): fix: resolve operations when OpenAPI path items use `$ref`
+
+  Path entries and webhooks can reference `components.pathItems` instead of inlining operations. Navigation, mutators, search, and markdown export now resolve path-item references before reading HTTP methods and path-level parameters.
+
+- [#9418](https://github.com/scalar/scalar/pull/9418): Keep nested JSON multipart field types after editing the request body form. Editing a form row no longer turns a nested object's booleans, numbers, and arrays into strings on the wire.
+
+## 0.54.2
+
+### Patch Changes
+
+- [#9471](https://github.com/scalar/scalar/pull/9471): Restore support for the deprecated `source` install command on `x-scalar-sdk-installation`. When set, it is appended to `description` as a fenced code block (or used on its own when there is no `description`). `description` remains the promoted field.
+
+## 0.54.1
+
+## 0.54.0
+
+### Minor Changes
+
+- [#9438](https://github.com/scalar/scalar/pull/9438): feat(api-reference): add an AsyncAPI server selector
+
+  Adds a server selector for AsyncAPI documents in the API reference introduction. It mirrors the OpenAPI server selector but works with the AsyncAPI server shape (a named map of `host`/`protocol`/`pathname`), labelling each server with its constructed connection URL.
+
+  Server selection and variable changes are now persisted to the workspace store via new `asyncapi-server:update:selected` and `asyncapi-server:update:variables` events and their mutators, mirroring the OpenAPI wiring.
+
+- [#9398](https://github.com/scalar/scalar/pull/9398): feat: read code samples from x-readme, x-stainless and x-scalar extensions
+
+  In addition to `x-codeSamples`, the code sample picker now reads custom samples from `x-scalar-examples`, `x-stainless-snippets`, `x-stainless-examples`, and `x-readme.code-samples`. When more than one is present on an operation, the highest-priority source is used (x-scalar-examples > x-stainless-snippets > x-stainless-examples > x-readme > x-codeSamples).
+
+- [#9399](https://github.com/scalar/scalar/pull/9399): Show custom SDK installation instructions from `x-scalar-sdk-installation` in the introduction card, falling back to the client selector when there are none. Each entry takes a `lang` and a Markdown `description`, so a single tab can render rich instructions with syntax-highlighted code blocks (for example Maven and Gradle for Java)
+
+### Patch Changes
+
+- [#9404](https://github.com/scalar/scalar/pull/9404): Send `multipart/form-data` and `application/x-www-form-urlencoded` object properties using their OpenAPI encoding `style`/`explode` (for example `style: deepObject` produces `address[city]=...` bracket notation) instead of always JSON-stringifying them. The request sent over the wire now matches the generated code snippet.
+- [#9419](https://github.com/scalar/scalar/pull/9419): feat(workspace-store): keep JSON Schema 2020-12 `$id`, `$anchor`, `$dynamicAnchor`, and `$dynamicRef` on Schema Objects so they survive parsing
+- [#9131](https://github.com/scalar/scalar/pull/9131): fix(api-reference): preserve OAuth redirect URI when switching OpenAPI documents
+
+  When using multiple OpenAPI documents with OAuth configured via `oauth2RedirectUri`,
+  switching to another document no longer clears the Redirect URL in the Authentication
+  section.
+
+  The fix threads `oauth2RedirectUri` from the top-level configuration into the security
+  scheme merge chain so that each newly loaded document's OAuth flows are pre-populated
+  with the configured redirect URI, rather than relying solely on a component-level watcher
+  that would skip re-population when the same OAuth flow identity was detected across
+  documents.
+
+- [#9351](https://github.com/scalar/scalar/pull/9351): fix: preserve large integer parameter values
+
+  Stop JSON-parsing primitive parameter values when building requests. Integer and number path, query, and header fields keep the exact string from the editor so values larger than Number.MAX_SAFE_INTEGER are not rounded. Array and object parameters are still parsed for OpenAPI style serialization.
+
+## 0.53.0
+
+### Minor Changes
+
+- [#9340](https://github.com/scalar/scalar/pull/9340): feat: add getChannelConnectionContext for AsyncAPI WebSocket channels
+
+  Add channel connection context helpers that resolve channel, messages, parameters, servers, security, and connection URL for WebSocket client UI.
+
+- [#9372](https://github.com/scalar/scalar/pull/9372): Render AsyncAPI `components.schemas` as Models, listed in the sidebar and content just like OpenAPI schemas
+- [#9331](https://github.com/scalar/scalar/pull/9331): feat: generate AsyncAPI sidebar navigation on document ingest
+
+  Add `TraversedAsyncApiChannel`, `TraversedAsyncApiOperation`, and `TraversedAsyncApiMessage` navigation entry types, plus `traverseAsyncApiDocument` wired into the AsyncAPI ingest path. Navigation is structured as channel → operation → message, with messages resolved per operation (all channel messages by default, or filtered via `operation.messages`).
+
+### Patch Changes
+
+- [#9255](https://github.com/scalar/scalar/pull/9255): Surface the Introduction entry and any headings extracted from `info.description` of AsyncAPI documents in the sidebar, mirroring how OpenAPI documents are handled.
+- [#9309](https://github.com/scalar/scalar/pull/9309): feat: add `modelsSectionLabel` configuration (`'Models' | 'Schemas' | string`) to use OpenAPI-style Schemas terminology in the sidebar, content, and search.
+- [#9383](https://github.com/scalar/scalar/pull/9383): fix: preserve multi-type schema arrays when coercing schemas with validation keywords
+
+## 0.52.0
+
+### Minor Changes
+
+- [#9313](https://github.com/scalar/scalar/pull/9313): feat: add AsyncAPI connection URL builder and server list helpers
+
+### Patch Changes
+
+- [#9334](https://github.com/scalar/scalar/pull/9334): Add analytics events for document save and registry sync (pull/push) actions
+- [#9333](https://github.com/scalar/scalar/pull/9333): feat: respect the `x-order` extension when building schema examples
+
+## 0.51.2
+
+## 0.51.1
+
+### Patch Changes
+
+- [#9145](https://github.com/scalar/scalar/pull/9145): feat(workspace-store): expose `style`, `explode`, and `allowReserved` on the multipart Encoding Object schema and type, matching OpenAPI 3.1.1
+- [#9155](https://github.com/scalar/scalar/pull/9155): feat(api-client): expand nested object properties of multipart form-data schemas into individual editable rows (e.g. `props.name`, `props.description`); the wire still sends one `application/json` multipart part per top-level object property — both for the initial schema-derived example and for edited form rows
+- [#9292](https://github.com/scalar/scalar/pull/9292): refactor: move extensions to the schema package
+- [#9301](https://github.com/scalar/scalar/pull/9301): refactor: use AsyncAPI 3.1 schemas from `@scalar/schemas`
+  - Remove local minimal AsyncAPI document schema definitions
+  - Use `asyncApiObjectSchema` from `@scalar/schemas/asyncapi/3.1` for workspace document validation
+  - Use `AsyncApiDocument` type from `@scalar/types/asyncapi/3.1`
+
+- [#9256](https://github.com/scalar/scalar/pull/9256): Respect `operationTitleSource: 'path'` when building sidebar navigation so operation paths render instead of summaries.
+
+## 0.51.0
+
+### Minor Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: UID-based workspaces and local-team migration
+
+  IndexedDB v2 migrates existing data into the new shape, collapses all workspaces into the local team (aligned with a single team workspace on the client for now), resolves slug collisions deterministically, re-keys chunk stores by workspaceUid, and strips x-scalar-tabs and x-scalar-active-tab from meta chunks so routing does not follow stale paths after migration or slug changes.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add Cmd/Ctrl+S for `ui:save:local-document` so hosts (e.g. scalar-app) can match the header Save control for local workspaces
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: stop coercing rebased documents against the strict OpenAPI schema so AsyncAPI documents survive a rebase without having OpenAPI fields injected
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): remove outdated Biome suppression in schema traversal loop
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix urlencoded request body serialization for nested object and array values
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: OAuth scope CRUD mutators
+  - New mutators **`upsertScope`** and **`deleteScope`** backed by new `AuthEvents` entries; **`updateSelectedScopes`** only updates selection state.
+  - **Rename**: `upsertScope` rewrites the scope key in the flow and mirrors the new key in every document- and operation-level selected requirement for that scheme.
+  - **Delete**: `deleteScope` removes the scope from the flow and drops it from matching selections.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(workspace-store): respect x-internal and x-scalar-ignore on $ref wrapper schemas, operations, and webhooks in the sidebar
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: initialize selection when updating OAuth2 scopes with preferredSecurityScheme
+
+  When preferredSecurityScheme is used, the selection is computed on-the-fly by getSelectedSecurity but not persisted to the auth store. This caused updateSelectedScopes to fail silently when users tried to select scopes, as it couldn't find a stored selection to update.
+
+  The fix initializes the selection in the auth store when it doesn't exist, allowing scope updates to work correctly with preferredSecurityScheme.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: share executable URL build for copy and buildRequest
+
+  Copy URL from the operation address bar now matches the URL that is actually sent: path parameters, operation query string, environment substitution, and security schemes that use in: query are all applied the same way as Send.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat(workspace-store): add `getDocumentType` helper to identify OpenAPI vs AsyncAPI documents
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add more analytics events
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): expand object query parameters in the request UI
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: omit disabled default headers when building requests
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): request body content types — OpenAPI extras, MIME labels, and "Other" without auto Content-Type
+
+  The request body dropdown lists built-in types first, then any additional media types from the OpenAPI operation. Labels use the MIME essence (no `charset` in the label). The **Other** option is available again for a raw body: it does **not** add an automatic `Content-Type` header (users can set one manually). Code snippets avoid injecting `Content-Type: other`.
+
+  `getDefaultHeaders` and `filterDisabledDefaultHeaders` are exported from `@scalar/workspace-store/request-example`; the API client uses them for code snippets instead of a duplicate helper.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: forward selected forbidden headers via `X-Scalar-*` when proxying
+
+  Browsers strip selected forbidden headers from outgoing requests. When using the Scalar proxy (or running in Electron), we now rewrite a small allowlist (`Date`, `DNT`, and `Referer`) to `X-Scalar-*` headers so the proxy can forward the intended upstream headers without opening support for the full forbidden-header set.
+
+## 0.50.0
+
+### Minor Changes
+
+- [#9195](https://github.com/scalar/scalar/pull/9195): feat: UID-based workspaces and local-team migration
+
+  IndexedDB v2 migrates existing data into the new shape, collapses all workspaces into the local team (aligned with a single team workspace on the client for now), resolves slug collisions deterministically, re-keys chunk stores by workspaceUid, and strips x-scalar-tabs and x-scalar-active-tab from meta chunks so routing does not follow stale paths after migration or slug changes.
+
+- [#9018](https://github.com/scalar/scalar/pull/9018): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#9185](https://github.com/scalar/scalar/pull/9185): feat: add Cmd/Ctrl+S for `ui:save:local-document` so hosts (e.g. scalar-app) can match the header Save control for local workspaces
+- [#9018](https://github.com/scalar/scalar/pull/9018): fix: stop coercing rebased documents against the strict OpenAPI schema so AsyncAPI documents survive a rebase without having OpenAPI fields injected
+- [#9184](https://github.com/scalar/scalar/pull/9184): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9142](https://github.com/scalar/scalar/pull/9142): remove outdated Biome suppression in schema traversal loop
+- [#9098](https://github.com/scalar/scalar/pull/9098): fix urlencoded request body serialization for nested object and array values
+- [#9168](https://github.com/scalar/scalar/pull/9168): fix: OAuth scope CRUD mutators
+  - New mutators **`upsertScope`** and **`deleteScope`** backed by new `AuthEvents` entries; **`updateSelectedScopes`** only updates selection state.
+  - **Rename**: `upsertScope` rewrites the scope key in the flow and mirrors the new key in every document- and operation-level selected requirement for that scheme.
+  - **Delete**: `deleteScope` removes the scope from the flow and drops it from matching selections.
+
+- [#9142](https://github.com/scalar/scalar/pull/9142): fix(workspace-store): respect x-internal and x-scalar-ignore on $ref wrapper schemas, operations, and webhooks in the sidebar
+- [#8984](https://github.com/scalar/scalar/pull/8984): fix: initialize selection when updating OAuth2 scopes with preferredSecurityScheme
+
+  When preferredSecurityScheme is used, the selection is computed on-the-fly by getSelectedSecurity but not persisted to the auth store. This caused updateSelectedScopes to fail silently when users tried to select scopes, as it couldn't find a stored selection to update.
+
+  The fix initializes the selection in the auth store when it doesn't exist, allowing scope updates to work correctly with preferredSecurityScheme.
+
+- [#9150](https://github.com/scalar/scalar/pull/9150): fix: share executable URL build for copy and buildRequest
+
+  Copy URL from the operation address bar now matches the URL that is actually sent: path parameters, operation query string, environment substitution, and security schemes that use in: query are all applied the same way as Send.
+
+- [#9159](https://github.com/scalar/scalar/pull/9159): feat(workspace-store): add `getDocumentType` helper to identify OpenAPI vs AsyncAPI documents
+- [#9125](https://github.com/scalar/scalar/pull/9125): feat: add more analytics events
+- [#9055](https://github.com/scalar/scalar/pull/9055): fix(api-client): expand object query parameters in the request UI
+- [#9127](https://github.com/scalar/scalar/pull/9127): fix: omit disabled default headers when building requests
+- [#9134](https://github.com/scalar/scalar/pull/9134): fix(api-client): request body content types — OpenAPI extras, MIME labels, and "Other" without auto Content-Type
+
+  The request body dropdown lists built-in types first, then any additional media types from the OpenAPI operation. Labels use the MIME essence (no `charset` in the label). The **Other** option is available again for a raw body: it does **not** add an automatic `Content-Type` header (users can set one manually). Code snippets avoid injecting `Content-Type: other`.
+
+  `getDefaultHeaders` and `filterDisabledDefaultHeaders` are exported from `@scalar/workspace-store/request-example`; the API client uses them for code snippets instead of a duplicate helper.
+
+- [#9035](https://github.com/scalar/scalar/pull/9035): fix: forward selected forbidden headers via `X-Scalar-*` when proxying
+
+  Browsers strip selected forbidden headers from outgoing requests. When using the Scalar proxy (or running in Electron), we now rewrite a small allowlist (`Date`, `DNT`, and `Referer`) to `X-Scalar-*` headers so the proxy can forward the intended upstream headers without opening support for the full forbidden-header set.
+
 ## 0.49.3
 
 ### Patch Changes

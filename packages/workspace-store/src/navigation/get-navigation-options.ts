@@ -1,5 +1,5 @@
 import { slugify } from '@scalar/helpers/string/slugify'
-import type { ApiReferenceConfigurationRaw } from '@scalar/types/api-reference'
+import { type ApiReferenceConfigurationRaw, DEFAULT_MODELS_SECTION_LABEL } from '@scalar/types/api-reference'
 
 import type { TraverseSpecOptions } from '@/navigation/types'
 import type { IdGenerator } from '@/schemas/navigation'
@@ -16,6 +16,8 @@ export type NavigationOptions =
         | 'operationsSorter'
         | 'tagsSorter'
         | 'hideModels'
+        | 'modelsSectionLabel'
+        | 'operationTitleSource'
       >
     >
   | undefined
@@ -26,6 +28,9 @@ export type NavigationOptions =
  * The returned options can be influenced by the provided DocumentConfiguration
  */
 export const getNavigationOptions = (documentName: string, options?: NavigationOptions): TraverseSpecOptions => {
+  const modelsSectionLabel = options?.modelsSectionLabel ?? DEFAULT_MODELS_SECTION_LABEL
+  const modelsSectionSlug = slugify(modelsSectionLabel)
+
   const generateId: IdGenerator = (props) => {
     const documentId = slugify(documentName)
 
@@ -52,6 +57,29 @@ export const getNavigationOptions = (documentName: string, options?: NavigationO
       }
 
       return `${documentId}/${tagPrefix}/${slugify(props.tag.name ?? '')}`
+    }
+
+    // -------- Default AsyncAPI channel id generation logic --------
+    if (props.type === 'asyncapi-channel') {
+      const prefixTag = props.parentTag
+        ? `${generateId({
+            type: 'tag',
+            tag: props.parentTag.tag,
+            parentId: props.parentTag.id,
+          })}/`
+        : `${documentId}/`
+
+      return `${prefixTag}asyncapi-channel/${slugify(props.channelName)}`
+    }
+
+    // -------- Default AsyncAPI message id generation logic --------
+    if (props.type === 'asyncapi-message') {
+      return `${props.parentId}/asyncapi-message/${slugify(props.messageName)}`
+    }
+
+    // -------- Default AsyncAPI operation id generation logic --------
+    if (props.type === 'asyncapi-operation') {
+      return `${props.parentId}/asyncapi-operation/${slugify(props.operationName)}`
     }
 
     // -------- Default operation id generation logic --------
@@ -93,13 +121,16 @@ export const getNavigationOptions = (documentName: string, options?: NavigationO
         })}`
       }
 
-      return `${prefixTag}webhook/${props.method?.toUpperCase()}/${slugify(props.name)}`
+      // Webhook events are commonly named with dots (e.g. "account_holder.created").
+      // Keep the dot so the deep link stays close to the event name, instead of
+      // dropping it and joining adjacent words ("account-holdercreated").
+      return `${prefixTag}webhook/${props.method?.toUpperCase()}/${slugify(props.name, { allowedSpecialChars: '.' })}`
     }
 
     // -------- Default model id generation logic --------
     if (props.type === 'model') {
       if (!props.name) {
-        return `${documentId}/models`
+        return `${documentId}/${modelsSectionSlug}`
       }
 
       const prefixTag = props.parentTag
@@ -111,12 +142,12 @@ export const getNavigationOptions = (documentName: string, options?: NavigationO
         : `${documentId}/`
 
       if (options?.generateModelSlug) {
-        return `${prefixTag}model/${options.generateModelSlug({
+        return `${prefixTag}${modelsSectionSlug}/${options.generateModelSlug({
           name: props.name,
         })}`
       }
 
-      return `${prefixTag}model/${slugify(props.name, { preserveCase: true })}`
+      return `${prefixTag}${modelsSectionSlug}/${slugify(props.name, { preserveCase: true })}`
     }
 
     if (props.type === 'example') {
@@ -134,8 +165,10 @@ export const getNavigationOptions = (documentName: string, options?: NavigationO
 
   return {
     hideModels: options?.hideModels ?? false,
+    modelsSectionLabel,
     operationsSorter: options?.operationsSorter,
     tagsSorter: options?.tagsSorter,
+    operationTitleSource: options?.operationTitleSource,
     generateId,
   }
 }

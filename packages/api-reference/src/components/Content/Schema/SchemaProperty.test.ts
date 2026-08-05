@@ -1,4 +1,4 @@
-import { ScalarListbox } from '@scalar/components'
+import { ScalarListbox } from '@scalar/components/listbox'
 import { coerceValue } from '@scalar/workspace-store/schemas/typebox-coerce'
 import { SchemaObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { mount } from '@vue/test-utils'
@@ -126,6 +126,54 @@ describe('SchemaProperty', () => {
 
         expect(schemas).toHaveLength(1)
       })
+
+      // https://github.com/scalar/scalar/issues/5900
+      it.each(['allOf', 'oneOf', 'anyOf'] as const)(
+        'renders array items wrapped in a single-item %s without extra nesting',
+        async (composition) => {
+          // An array whose items are wrapped in a single-item composition is equivalent to
+          // an array whose items are a plain object. Both should render identically.
+          const compositionItems = mount(SchemaProperty, {
+            props: {
+              eventBus: null,
+              schema: coerceValue(SchemaObjectSchema, {
+                type: 'array',
+                title: 'foos array',
+                items: {
+                  title: 'foos array element',
+                  [composition]: [{ type: 'object', properties: { foo: { title: 'foo value', type: 'string' } } }],
+                },
+              }),
+              options: {},
+            },
+          })
+
+          const plainItems = mount(SchemaProperty, {
+            props: {
+              eventBus: null,
+              schema: coerceValue(SchemaObjectSchema, {
+                type: 'array',
+                title: 'bars array',
+                items: {
+                  type: 'object',
+                  title: 'bars array element',
+                  properties: { bar: { title: 'bar value', type: 'string' } },
+                },
+              }),
+              options: {},
+            },
+          })
+
+          await compositionItems.find('.schema-card-title').trigger('click')
+          await plainItems.find('.schema-card-title').trigger('click')
+
+          // The composition variant must not introduce an additional level of Schema nesting.
+          expect(compositionItems.findAllComponents(Schema)).toHaveLength(plainItems.findAllComponents(Schema).length)
+
+          // The element title must be shown exactly once (it was duplicated by the extra nesting).
+          expect(compositionItems.html().match(/foos array element/g)).toHaveLength(1)
+        },
+      )
 
       it('hides expand button for array with primitive items', () => {
         const wrapper = mount(SchemaProperty, {
@@ -349,6 +397,33 @@ describe('SchemaProperty', () => {
         expect(html).toContain('A planet made mostly of iron')
       })
 
+      it('lists enum values once for an array whose items are a $ref to an enum', () => {
+        // `noncollapsible` is how ParameterListItem mounts this. Without it the
+        // items card starts collapsed and this passes even with the bug present.
+        const wrapper = mount(SchemaProperty, {
+          props: {
+            eventBus: null,
+            compact: true,
+            noncollapsible: true,
+            schema: coerceValue(SchemaObjectSchema, {
+              type: 'array',
+              items: {
+                '$ref': '#/components/schemas/OrderBy',
+                '$ref-value': {
+                  type: 'string',
+                  title: 'OrderBy',
+                  enum: ['created_at', 'name'],
+                },
+              },
+            }),
+            options: {},
+          },
+        })
+
+        expect(wrapper.findAll('.property-enum-values')).toHaveLength(1)
+        expect(wrapper.findAll('.property-enum-value')).toHaveLength(2)
+      })
+
       it('displays enum values within composition schemas', () => {
         const wrapper = mount(SchemaProperty, {
           props: {
@@ -431,7 +506,9 @@ describe('SchemaProperty', () => {
 
   describe('composition schemas', () => {
     describe('array compositions', () => {
-      it('renders composition schemas for array items with oneOf', async () => {
+      // A single-item composition is equivalent to its only member, so it is flattened and rendered
+      // like a plain object instead of through a composition panel. See #5900
+      it('flattens array items with a single-item oneOf composition', async () => {
         const wrapper = mount(SchemaProperty, {
           props: {
             eventBus: null,
@@ -451,15 +528,14 @@ describe('SchemaProperty', () => {
           },
         })
 
-        expect(wrapper.find('button[aria-expanded="false"]').exists()).toBe(true)
-
         await wrapper.find('.schema-card-title').trigger('click')
 
-        const foobar = wrapper.html().match(/foobar/g)
-        expect(foobar).toHaveLength(1)
+        // The member is rendered directly, with its description shown exactly once.
+        expect(wrapper.text()).toContain('test')
+        expect(wrapper.html().match(/foobar/g)).toHaveLength(1)
       })
 
-      it('renders array items with oneOf composition after expansion', async () => {
+      it('flattens array items with a single-item oneOf alongside a base type', async () => {
         const wrapper = mount(SchemaProperty, {
           props: {
             eventBus: null,
@@ -479,19 +555,14 @@ describe('SchemaProperty', () => {
           },
         })
 
-        // The composition description should not be visible before expanding
-        expect(wrapper.html().match(/foobar/g)).toBeNull()
-
-        // Expand all schema cards to reveal nested content
         const buttons = wrapper.findAll('button.schema-card-title')
         for (const button of buttons) {
           await button.trigger('click')
           await wrapper.vm.$nextTick()
         }
 
-        // Now "foobar" should be present
-        const foobar = wrapper.html().match(/foobar/g)
-        expect(foobar).toHaveLength(1)
+        expect(wrapper.text()).toContain('test')
+        expect(wrapper.html().match(/foobar/g)).toHaveLength(1)
       })
     })
 

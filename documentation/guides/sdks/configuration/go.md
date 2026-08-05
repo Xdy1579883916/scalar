@@ -1,86 +1,105 @@
 # Go
 
-This section details the available configuration options for the Go SDK. All configuration is managed in the `gen.yaml` file under the `go` section.
+Add `go` under `targets` to generate a Go SDK package.
 
-## Version and general configuration
-
-```yml
-go:
-  version: 1.2.3
-  packageName: "custom-sdk"
+```json
+{
+  "targets": {
+    "go": {
+      "packageName": "acmeapi",
+      "destinations": {
+        "production": {
+          "repo": "acme/acme-go"
+        }
+      },
+      "publish": {
+        "go": true
+      }
+    }
+  }
+}
 ```
 
-| Name | Required | Default Value | Description |
-|------|----------|---------------|-------------|
-| version | true | 0.0.1 | The current version of the SDK. |
-| packageName | true | openapi | The Go module package name. See [Go Module Path Documentation](https://go.dev/ref/mod#module-path). |
+## Target Options
 
-## Additional dependencies
+| Property               | Type      | Description                                                      |
+| ---------------------- | --------- | ---------------------------------------------------------------- |
+| `packageName`          | `string`  | Go module or package name.                                       |
+| `goModulePathOverride` | `string`  | Module path written to `go.mod` and every generated import, when it must differ from the one derived from the destination repository. |
+| `pointerServices`      | `boolean` | Generate a pointer-shaped client surface. Defaults to `false`.   |
+| `skip`                 | `boolean` | Set to `true` to keep the config without generating this target. |
+| `destinations`         | `object`  | GitHub destinations for generated output.                        |
+| `publish`              | `object`  | Go module publishing configuration.                              |
 
-```yml
-go:
-  additionalDependencies:
-    axios: "0.21.0"
+## Module Path
+
+The module path is normally derived from `destinations.production.repo`: `acme/acme-go` becomes `github.com/acme/acme-go`. Set `goModulePathOverride` when the path consumers import differs from the repository the code is pushed to — a vanity import domain, or a module served from a subdirectory.
+
+```json
+{
+  "targets": {
+    "go": {
+      "goModulePathOverride": "go.acme.com/api"
+    }
+  }
+}
 ```
 
-| Name | Required | Default Value | Description |
-|------|----------|---------------|-------------|
-| additionalDependencies | false | {} | Add additional dependencies to include in the generated `go.mod`. |
+## Client Shape
 
-## Method and parameter management
+By default the generated client is value-shaped: `NewClient` returns a `Client` and service fields are plain values. Set `pointerServices` to `true` for the pointer-shaped surface instead — `NewClient` returns `*Client` and service fields are `*XService`.
 
-```yml
-go
-  maxMethodParams: 4
-  methodArguments: "require-security-and-request"
+```json
+{
+  "targets": {
+    "go": {
+      "pointerServices": true
+    }
+  }
+}
 ```
 
-| Name | Required | Default Value | Description |
-|------|----------|---------------|-------------|
-| maxMethodParams | false | 4 | The maximum number of parameters a method can have before the resulting SDK endpoint is no longer "flattened" and an input object is created. `0` will use input objects always. Must match the regex pattern `/^\\d+$/`. |
-| methodArguments | false | require-security-and-request | Determines how arguments for SDK methods are generated. Options: `"infer-optional-args"` or `"require-security-and-request"`. |
+## Destinations
 
-## Security configuration
+Use `destinations.production` to push generated output to a GitHub repository.
 
-```yml
-go
-  envVarPrefix: SPEAKEASY
-  flattenGlobalSecurity: true
+```json
+{
+  "targets": {
+    "go": {
+      "destinations": {
+        "production": {
+          "repo": "acme/acme-go",
+          "branch": "main"
+        }
+      }
+    }
+  }
+}
 ```
 
-| Name | Required | Default Value | Description |
-|------|----------|---------------|-------------|
-| clientServerStatusCodesAsErrors | false | true | Whether to treat `4xx` and `5xx` status codes as errors. |
-| flattenGlobalSecurity | false | newSDK | Flatten the global security configuration if there is only a single option in the spec. |
+| Property | Description                                                                 |
+| -------- | --------------------------------------------------------------------------- |
+| `repo`   | GitHub repository in `owner/name` form.                                     |
+| `branch` | Default branch of the destination repository that releases are promoted to. Defaults to `main`. Generated output itself always goes to the fixed `scalar-generated` branch. |
 
-## Import management
+## Publishing
 
-```yml
-go
-  imports:
-    paths:
-      callbacks: models/callbacks
-      errors: models/errors
-      operations: models/operations
-      shared: models/components
-      webhooks: models/webhooks
+Set `publish.go` to `true` to tag each release so the Go module proxy can serve it. Go has no registry upload and needs no secrets — see [Go publishing](../publishing/go.md).
+
+```json
+{
+  "targets": {
+    "go": {
+      "publish": {
+        "go": true
+      }
+    }
+  }
+}
 ```
 
-| Path | Default Value | Description |
-|------|---------------|-------------|
-| shared | models/components | The directory for shared components, such as reusable schemas, and data models. |
-| operations | models/operations | The directory where operation models (i.e., API endpoints) will be imported from. |
-| errors | models/sdkerrors | The directory where error models will be imported from. |
-| callbacks | models/callbacks | The directory where callback models will be imported from. |
-| webhooks | models/webhooks | The directory where webhook models will be imported from. |
-
-## Error and response handling
-
-```yml
-go:
-  responseFormat: "envelope-http"
-```
-
-| Name | Required | Default Value | Description |
-|------|----------|---------------|-------------|
-| responseFormat | false | envelope-http | Determines the shape of the response envelope that is returned from SDK methods. Must be `envelope-http`, `envelope`, or `flat` only. |
+| Property             | Description                                                   |
+| -------------------- | ------------------------------------------------------------- |
+| `authMethod`         | Registry authentication mechanism, such as `oidc` or `access-token`. |
+| `releaseEnvironment` | Release environment name used by generated publishing workflows. |

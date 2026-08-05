@@ -1,7 +1,7 @@
-import type { DiscriminatorObject } from './discriminator'
-import type { ExternalDocumentationObject } from './external-documentation'
-import type { ReferenceObject } from './reference'
-import type { XmlObject } from './xml'
+import type { DiscriminatorObject } from './discriminator.js'
+import type { ExternalDocumentationObject } from './external-documentation.js'
+import type { ReferenceObject } from './reference.js'
+import type { XmlObject } from './xml.js'
 export type PrimitiveSchemaType = 'boolean' | 'string' | 'number' | 'integer' | 'object' | 'array'
 export type StringFormat =
   | 'date'
@@ -93,20 +93,9 @@ type ObjectObject = SharedProperties &
   ObjectKeywords & {
     type: 'object'
   } & Extensions
-export type MultiTypeObject = SharedProperties &
-  NumericKeywords &
-  StringKeywords &
-  ArrayKeywords &
-  ObjectKeywords & {
-    type?: PrimitiveSchemaType
-    format?: StringFormat | NumericFormat | string
-  } & Extensions
-export type SchemaObject =
-  | UntypedObject
-  | OtherTypes
-  | NumericObject
-  | StringObject
-  | ObjectObject
-  | ArrayObject
-  | MultiTypeObject
+// OpenAPI 3.0 does not support multi-type schemas (`type` must be a single
+// string), so there is no MultiTypeObject variant. The single-type case is
+// already covered by OtherTypes, NumericObject, StringObject, ObjectObject,
+// and ArrayObject.
+export type SchemaObject = UntypedObject | OtherTypes | NumericObject | StringObject | ObjectObject | ArrayObject
 export {}

@@ -11,16 +11,17 @@
     "directory": "packages/client-side-rendering"
   },
   "keywords": [],
-  "version": "0.1.7",
+  "version": "0.3.5",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "test": "vitest --run",
-    "types:check": "tsc --noEmit"
+    "types:check": "tsgo --noEmit"
   },
   "type": "module",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",

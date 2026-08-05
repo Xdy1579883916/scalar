@@ -1,8 +1,8 @@
 import { createWorkspaceStore } from '@scalar/workspace-store/client'
-import { createWorkspaceStorePersistence } from '@scalar/workspace-store/persistence'
+import { createWorkspaceStorePersistence, generateWorkspaceUid } from '@scalar/workspace-store/persistence'
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { computed, nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import 'fake-indexeddb/auto'
 
@@ -12,6 +12,7 @@ import { useCommandPaletteState } from '@/features/command-palette/hooks/use-com
 
 import App from './App.vue'
 import { createAppState } from './app-state'
+import { filterWorkspacesByTeam } from './helpers/filter-workspaces'
 import { ROUTES } from './helpers/routes'
 
 /** Minimal valid OpenAPI document used for mock fetch responses */
@@ -86,8 +87,25 @@ describe('App', () => {
     })
 
     const persistence = await createWorkspaceStorePersistence()
+
+    // The fake-indexeddb instance is shared across tests in this file, so
+    // we have to make setup idempotent: if a workspace already lives at
+    // this slug pair (left over from a previous test), reuse its UID
+    // instead of generating a new one and tripping the unique
+    // `[teamSlug, slug]` index.
+    const existing = await persistence.workspace.getItemBySlug({
+      teamSlug: WORKSPACE_TEAM_SLUG,
+      slug: WORKSPACE_SLUG,
+    })
+    const workspaceUid = existing?.workspaceUid ?? generateWorkspaceUid()
+
     await persistence.workspace.setItem(
-      { teamSlug: WORKSPACE_TEAM_SLUG, slug: WORKSPACE_SLUG },
+      {
+        workspaceUid,
+        teamUid: 'local',
+        teamSlug: WORKSPACE_TEAM_SLUG,
+        slug: WORKSPACE_SLUG,
+      },
       {
         name: 'Default',
         workspace: store.exportWorkspace(),
@@ -113,7 +131,7 @@ describe('App', () => {
       routes: ROUTES,
     })
 
-    const appState = await createAppState({ router, options: { oauth2RedirectUri, customFetch } })
+    const appState = await createAppState({ router, layout, options: { oauth2RedirectUri, customFetch } })
 
     await router.push({
       name: routeName,
@@ -122,6 +140,16 @@ describe('App', () => {
 
     await router.isReady()
 
+    // Simulate what App.vue's router.afterEach does — call handleRouteChange
+    // so the workspace loads from IndexedDB.
+    appState.handleRouteChange(router.currentRoute.value, {
+      teamSlug: computed(() => WORKSPACE_TEAM_SLUG),
+      teamUid: computed(() => 'local'),
+      filteredWorkspaces: computed(() =>
+        filterWorkspacesByTeam(appState.workspace.workspaceList.value, WORKSPACE_TEAM_SLUG),
+      ),
+    })
+
     const commandPaletteState = useCommandPaletteState()
 
     const wrapper = mount(App, {
@@ -129,6 +157,7 @@ describe('App', () => {
         layout,
         getAppState: () => appState,
         getCommandPaletteState: () => commandPaletteState,
+        workspaceGroups: [],
       },
       global: {
         plugins: [router],
@@ -223,7 +252,7 @@ describe('App', () => {
       }),
     )
 
-    const { appState } = await setupApp({ customFetch })
+    const { appState } = await setupApp({ customFetch, layout: 'desktop' })
 
     await appState.store.value?.addDocument({
       name: 'remote-api',
@@ -231,6 +260,7 @@ describe('App', () => {
     })
 
     expect(customFetch).toHaveBeenCalledTimes(1)
+    // Uses the proxy by default
     expect(customFetch).toHaveBeenCalledWith('https://example.com/openapi.json', { headers: undefined })
   })
 
@@ -249,7 +279,10 @@ describe('App', () => {
       url: 'https://example.com/openapi.json',
     })
 
-    expect(globalFetchSpy).toHaveBeenCalledWith('https://example.com/openapi.json', { headers: undefined })
+    expect(globalFetchSpy).toHaveBeenCalledWith(
+      'https://proxy.scalar.com/?scalar_url=https%3A%2F%2Fexample.com%2Fopenapi.json',
+      { headers: undefined },
+    )
     globalFetchSpy.mockRestore()
   })
 })

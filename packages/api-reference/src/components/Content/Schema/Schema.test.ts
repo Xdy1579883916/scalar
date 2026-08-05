@@ -1,8 +1,9 @@
 import { coerceValue } from '@scalar/workspace-store/schemas/typebox-coerce'
-import { SchemaObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+import { type SchemaObject, SchemaObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
+import { scrollTargetId } from '../../../helpers/lazy-bus'
 import Schema from './Schema.vue'
 
 describe('Schema', () => {
@@ -35,7 +36,7 @@ describe('Schema', () => {
       expect(text).toContain('This description should be shown')
     })
 
-    it('shows the first description with allOf composition', () => {
+    it('shows the overriding description with allOf composition', () => {
       const wrapper = mount(Schema, {
         props: {
           name: 'Request Body',
@@ -44,12 +45,12 @@ describe('Schema', () => {
             allOf: [
               {
                 type: 'object',
-                description: 'This description should be shown',
+                description: 'This description should not be shown',
                 properties: { name: { type: 'string' } },
               },
               {
                 type: 'object',
-                description: 'This description should not be shown',
+                description: 'This description should be shown',
                 properties: { email: { type: 'string' } },
               },
             ],
@@ -59,8 +60,78 @@ describe('Schema', () => {
       })
 
       const text = wrapper.text()
+      // A later allOf member overrides the earlier description
       expect(text).toContain('This description should be shown')
       expect(text).not.toContain('This description should not be shown')
+    })
+
+    it('renders the request body allOf description only once', () => {
+      const wrapper = mount(Schema, {
+        props: {
+          name: 'Request Body',
+          eventBus: null,
+          compact: true,
+          noncollapsible: true,
+          // The request body passes this context down to the composition
+          schemaContext: 'requestBody',
+          compositionPath: ['requestBody'],
+          schema: coerceValue(SchemaObjectSchema, {
+            allOf: [
+              {
+                type: 'object',
+                description: 'Base description',
+                properties: { name: { type: 'string' } },
+              },
+              {
+                type: 'object',
+                description: 'Overriding description',
+                properties: { email: { type: 'string' } },
+              },
+            ],
+          }),
+          options: {},
+        },
+      })
+
+      // The merged description is shown on the outer card, so the nested merged
+      // schema must not repeat it (see https://github.com/scalar/scalar/pull/9546)
+      const occurrences = wrapper.text().split('Overriding description').length - 1
+      expect(occurrences).toBe(1)
+    })
+
+    it('keeps the description of a nested request body allOf property', () => {
+      const wrapper = mount(Schema, {
+        props: {
+          name: 'Request Body',
+          eventBus: null,
+          compact: true,
+          noncollapsible: true,
+          // The request body passes this context down to the composition
+          schemaContext: 'requestBody',
+          compositionPath: ['requestBody'],
+          schema: coerceValue(SchemaObjectSchema, {
+            type: 'object',
+            properties: {
+              // A property whose schema is an allOf. The property row skips the
+              // description, so the nested merged schema is the only place it can
+              // appear and must not be hidden (see
+              // https://github.com/scalar/scalar/pull/9546).
+              user: {
+                allOf: [
+                  {
+                    type: 'object',
+                    description: 'Nested user information',
+                    properties: { name: { type: 'string' } },
+                  },
+                ],
+              },
+            },
+          }),
+          options: {},
+        },
+      })
+
+      expect(wrapper.text()).toContain('Nested user information')
     })
 
     it('does show the allOf description', () => {
@@ -134,6 +205,355 @@ describe('Schema', () => {
       })
 
       expect(wrapper.text()).toContain('Parent schema description')
+    })
+
+    // https://github.com/scalar/scalar/issues/7472
+    // NSwag emits the base type as a plain object with a `discriminator.mapping`
+    // but no `oneOf`/`anyOf`. The variant dropdown should still be inferred from
+    // the mapping.
+    it('renders a variant dropdown for an object schema with only discriminator mapping', () => {
+      const document = {
+        components: {
+          schemas: {
+            BaseClass: {
+              type: 'object',
+              discriminator: {
+                propertyName: '$type',
+                mapping: {
+                  Base: '#/components/schemas/BaseClass',
+                  Derived: '#/components/schemas/DerivedClass',
+                },
+              },
+              required: ['$type'],
+              properties: {
+                baseInt: { type: 'integer', format: 'int32' },
+                $type: { type: 'string' },
+              },
+            },
+            DerivedClass: {
+              allOf: [
+                { $ref: '#/components/schemas/BaseClass' },
+                { type: 'object', properties: { derivedInt: { type: 'integer' } } },
+              ],
+            },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Request Body',
+          schema: coerceValue(SchemaObjectSchema, document.components.schemas.BaseClass),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      // The composition selector (variant dropdown) should be rendered with the
+      // variants inferred from the mapping.
+      expect(wrapper.find('.composition-selector').exists()).toBe(true)
+      expect(wrapper.text()).toContain('One of')
+      expect(wrapper.text()).toContain('BaseClass')
+
+      // The discriminator property keeps its label inside the selected variant.
+      expect(wrapper.text()).toContain('Discriminator')
+    })
+
+    // https://github.com/scalar/scalar/issues/7472
+    // A schema may factor its common properties out alongside an explicit
+    // `oneOf` and a `discriminator.mapping`. The explicit composition already
+    // renders the selector, so the factored-out properties must not infer a
+    // second one from the same mapping.
+    it('does not infer a second selector for factored properties next to an explicit oneOf', () => {
+      const document = {
+        components: {
+          schemas: {
+            A: { type: 'object', title: 'A', properties: { aId: { type: 'string' } } },
+            B: { type: 'object', title: 'B', properties: { bId: { type: 'string' } } },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Request Body',
+          schema: coerceValue(SchemaObjectSchema, {
+            discriminator: {
+              propertyName: 'kind',
+              mapping: { a: '#/components/schemas/A', b: '#/components/schemas/B' },
+            },
+            oneOf: [{ $ref: '#/components/schemas/A' }, { $ref: '#/components/schemas/B' }],
+            properties: { kind: { type: 'string' } },
+          }),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      // Exactly one variant selector, from the explicit oneOf.
+      expect(wrapper.findAll('.composition-selector')).toHaveLength(1)
+    })
+
+    // https://github.com/scalar/scalar/issues/7472
+    // A nested property whose schema only declares a `discriminator.mapping`
+    // already gets its selector from `SchemaProperty` (via
+    // `getCompositionsToRender`). The object-properties child must not infer a
+    // second, identical selector.
+    it('does not infer a duplicate selector for a nested discriminator-mapping property', () => {
+      const petSchema = {
+        type: 'object',
+        discriminator: {
+          propertyName: '$type',
+          mapping: {
+            Base: '#/components/schemas/BaseClass',
+            Derived: '#/components/schemas/DerivedClass',
+          },
+        },
+        properties: {
+          baseInt: { type: 'integer' },
+          $type: { type: 'string' },
+        },
+      }
+
+      const document = {
+        components: {
+          schemas: {
+            BaseClass: petSchema,
+            DerivedClass: {
+              allOf: [
+                { $ref: '#/components/schemas/BaseClass' },
+                { type: 'object', properties: { derivedInt: { type: 'integer' } } },
+              ],
+            },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Request Body',
+          schema: coerceValue(SchemaObjectSchema, {
+            type: 'object',
+            properties: { pet: petSchema },
+          }),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      expect(wrapper.findAll('.composition-selector')).toHaveLength(1)
+      // The object's own properties still render alongside the selector.
+      expect(wrapper.text()).toContain('baseInt')
+    })
+
+    it('does not re-infer the discriminator mapping when a variant allOfs back to the base', async () => {
+      const configSchema = {
+        type: 'object',
+        required: ['formatVersion'],
+        properties: {
+          formatVersion: { type: 'string' },
+        },
+        discriminator: {
+          propertyName: 'formatVersion',
+          mapping: {
+            '2.2': '#/components/schemas/Config_v2_2',
+            '2.3': '#/components/schemas/Config_v2_3',
+          },
+        },
+      }
+
+      const document = {
+        components: {
+          schemas: {
+            Config: configSchema,
+            Config_v2_2: {
+              allOf: [
+                { $ref: '#/components/schemas/Config', '$ref-value': configSchema },
+                { type: 'object', properties: { fieldA: { type: 'string' } } },
+              ],
+            },
+            Config_v2_3: {
+              allOf: [
+                { $ref: '#/components/schemas/Config', '$ref-value': configSchema },
+                { type: 'object', properties: { fieldB: { type: 'string' } } },
+              ],
+            },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Response',
+          schema: coerceValue(SchemaObjectSchema, document.components.schemas.Config),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      const listbox = wrapper.findComponent({ name: 'ScalarListbox' })
+      await listbox.vm.$emit('update:modelValue', { id: '0', label: 'Config_v2_2' })
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findAll('.composition-selector')).toHaveLength(1)
+      expect(wrapper.text()).toContain('fieldA')
+      expect(wrapper.text()).toContain('formatVersion')
+      expect(wrapper.text()).not.toContain('fieldB')
+
+      await listbox.vm.$emit('update:modelValue', { id: '1', label: 'Config_v2_3' })
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findAll('.composition-selector')).toHaveLength(1)
+      expect(wrapper.text()).toContain('fieldB')
+      expect(wrapper.text()).toContain('formatVersion')
+      expect(wrapper.text()).not.toContain('fieldA')
+    })
+
+    it('keeps a nested property discriminator independent from a threaded parent discriminator', () => {
+      const petSchema = {
+        type: 'object',
+        discriminator: {
+          propertyName: 'petType',
+          mapping: {
+            Cat: '#/components/schemas/Cat',
+            Dog: '#/components/schemas/Dog',
+          },
+        },
+        properties: {
+          petType: { type: 'string' },
+          name: { type: 'string' },
+        },
+      }
+
+      const document = {
+        components: {
+          schemas: {
+            Cat: { type: 'object', properties: { meow: { type: 'boolean' } } },
+            Dog: { type: 'object', properties: { bark: { type: 'boolean' } } },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Request Body',
+          discriminator: {
+            propertyName: 'formatVersion',
+            mapping: { '2.2': '#/components/schemas/Config_v2_2' },
+          },
+          schema: coerceValue(SchemaObjectSchema, {
+            type: 'object',
+            properties: { pet: petSchema },
+          }),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      expect(wrapper.findAll('.composition-selector')).toHaveLength(1)
+      expect(wrapper.text()).toContain('One of')
+      expect(wrapper.text()).toContain('petType')
+      expect(wrapper.text()).toContain('Cat')
+    })
+
+    it('keeps nested branch discriminator mappings independent from the parent discriminator', () => {
+      const baseSchema = {
+        type: 'object',
+        discriminator: {
+          propertyName: 'rootKind',
+          mapping: { child: '#/components/schemas/Child' },
+        },
+        properties: { rootKind: { type: 'string' } },
+      }
+
+      const nestedPolymorphicSchema = {
+        type: 'object',
+        title: 'NestedPolymorphic',
+        discriminator: {
+          propertyName: 'petType',
+          mapping: { cat: '#/components/schemas/Cat' },
+        },
+        properties: { petType: { type: 'string' } },
+      }
+
+      const document = {
+        components: {
+          schemas: {
+            Base: baseSchema,
+            Child: {
+              allOf: [
+                { $ref: '#/components/schemas/Base', '$ref-value': baseSchema },
+                {
+                  type: 'object',
+                  properties: {
+                    nested: {
+                      oneOf: [
+                        nestedPolymorphicSchema,
+                        { type: 'object', title: 'OtherNested', properties: { other: { type: 'string' } } },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+            Cat: { type: 'object', title: 'Cat', properties: { meow: { type: 'boolean' } } },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Response',
+          schema: coerceValue(SchemaObjectSchema, baseSchema),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      expect(wrapper.findAll('.composition-selector').length).toBe(3)
+      expect(wrapper.text()).toContain('Cat')
+    })
+
+    // https://github.com/scalar/scalar/issues/7472
+    it('keeps rendering allOf members for a schema that also has a discriminator mapping', () => {
+      const document = {
+        components: {
+          schemas: {
+            Base: {
+              type: 'object',
+              properties: { baseInt: { type: 'integer' } },
+            },
+            Derived: {
+              type: 'object',
+              properties: { derivedInt: { type: 'integer' } },
+            },
+          },
+        },
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          eventBus: null,
+          name: 'Request Body',
+          schema: coerceValue(SchemaObjectSchema, {
+            // The `allOf` member carries a property that only appears when the
+            // merged `allOf` renders, not in the inferred oneOf variants.
+            allOf: [{ type: 'object', properties: { sharedAllOfProp: { type: 'string' } } }],
+            discriminator: {
+              propertyName: '$type',
+              mapping: {
+                Base: '#/components/schemas/Base',
+                Derived: '#/components/schemas/Derived',
+              },
+            },
+          }),
+          options: { expandAllSchemaProperties: true, document: document as never },
+        },
+      })
+
+      // The allOf member still renders — it was previously replaced by the
+      // inferred variant dropdown alone.
+      expect(wrapper.text()).toContain('sharedAllOfProp')
     })
   })
 
@@ -731,6 +1151,348 @@ describe('Schema', () => {
 
       // Check that the oneOf schema is inheiriting the description correctly
       expect(text).toContain('The date the object was closed in YYYY-MM-DD or ISO 8601 format.')
+    })
+  })
+  describe('expandAllSchemaProperties', () => {
+    it('renders the toggle and shows nested properties by default when expandAllSchemaProperties is true', () => {
+      const wrapper = mount(Schema, {
+        props: {
+          schema: {
+            type: 'object',
+            properties: {
+              foo: {
+                type: 'object',
+                properties: {
+                  bar: { type: 'string' },
+                },
+              },
+            },
+          },
+          level: 1,
+          eventBus: null,
+          options: { expandAllSchemaProperties: true },
+        },
+      })
+
+      expect(wrapper.find('button').exists()).toBe(true)
+      expect(wrapper.text()).toContain('bar')
+    })
+
+    it('renders the toggle when expandAllSchemaProperties is false', () => {
+      const wrapper = mount(Schema, {
+        props: {
+          schema: {
+            type: 'object',
+            properties: {
+              foo: {
+                type: 'object',
+                properties: {
+                  bar: { type: 'string' },
+                },
+              },
+            },
+          },
+          level: 1,
+          eventBus: null,
+          options: {},
+        },
+      })
+
+      expect(wrapper.find('button').exists()).toBe(true)
+    })
+
+    it('does not infinitely expand circular schema references when expandAllSchemaProperties is true', () => {
+      const circularSchema = {
+        type: 'object',
+        properties: {},
+      } as Extract<SchemaObject, { type: 'object' }>
+
+      circularSchema.properties = {
+        self: circularSchema,
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          schema: circularSchema,
+          level: 1,
+          eventBus: null,
+          options: { expandAllSchemaProperties: true },
+        },
+      })
+
+      expect(wrapper.text()).toContain('self')
+      expect(wrapper.find('button').exists()).toBe(true)
+    })
+
+    it('does not infinitely expand $ref-based circular schemas when expandAllSchemaProperties is true', () => {
+      // Mirror how the workspace store bundles a self-referential $ref: the
+      // property is a wrapper carrying both the ref string and the resolved node.
+      const node: any = {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+        },
+      }
+      node.properties.child = {
+        $ref: '#/components/schemas/Node',
+        '$ref-value': node,
+      }
+
+      const wrapper = mount(Schema, {
+        props: {
+          schema: node,
+          level: 1,
+          eventBus: null,
+          options: { expandAllSchemaProperties: true },
+        },
+      })
+
+      // The first level of the cycle is expanded...
+      expect(wrapper.text()).toContain('child')
+      // ...but the recursion stops with a toggle instead of expanding forever.
+      expect(wrapper.find('button').exists()).toBe(true)
+    })
+
+    it('expands deeply nested finite schemas fully when enabled', () => {
+      // Eight levels deep to verify finite branches are not artificially truncated.
+      const schema = {
+        type: 'object',
+        properties: {
+          l1: {
+            type: 'object',
+            properties: {
+              l2: {
+                type: 'object',
+                properties: {
+                  l3: {
+                    type: 'object',
+                    properties: {
+                      l4: {
+                        type: 'object',
+                        properties: {
+                          l5: {
+                            type: 'object',
+                            properties: {
+                              l6: {
+                                type: 'object',
+                                properties: {
+                                  l7: {
+                                    type: 'object',
+                                    properties: {
+                                      leaf: { type: 'string' },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as Extract<SchemaObject, { type: 'object' }>
+
+      const wrapper = mount(Schema, {
+        props: {
+          schema,
+          level: 0,
+          eventBus: null,
+          options: { expandAllSchemaProperties: true },
+        },
+      })
+
+      // The deepest property is visible and the collapse toggle remains available.
+      expect(wrapper.text()).toContain('leaf')
+      expect(wrapper.find('button').exists()).toBe(true)
+    })
+  })
+
+  describe('scroll target auto-expand', () => {
+    afterEach(() => {
+      // Reset the shared anchor target so it does not leak into other tests.
+      scrollTargetId.value = ''
+    })
+
+    it('stays collapsed when no anchor target points at a child property', () => {
+      const wrapper = mount(Schema, {
+        props: {
+          // This disclosure wraps the children of `foo` (breadcrumb root.foo).
+          schema: {
+            type: 'object',
+            properties: {
+              bar: { type: 'string' },
+            },
+          },
+          breadcrumb: ['root', 'foo'],
+          level: 1,
+          eventBus: null,
+          options: {},
+        },
+      })
+
+      // The disclosure is collapsed by default, so the child is not rendered.
+      expect(wrapper.text()).not.toContain('bar')
+    })
+
+    it('expands a collapsed disclosure when the anchor target is a child property', () => {
+      // Mimic landing on a deep link to `root.foo.bar` while `foo` is collapsed.
+      scrollTargetId.value = 'root.foo.bar'
+
+      const wrapper = mount(Schema, {
+        props: {
+          // This disclosure wraps the children of `foo` (breadcrumb root.foo).
+          schema: {
+            type: 'object',
+            properties: {
+              bar: { type: 'string' },
+            },
+          },
+          breadcrumb: ['root', 'foo'],
+          level: 1,
+          eventBus: null,
+          options: {},
+        },
+      })
+
+      // The disclosure on the path to the target opens itself so the target renders.
+      expect(wrapper.text()).toContain('bar')
+    })
+
+    it('expands a collapsed >12 properties section when the anchor target lives inside it', () => {
+      // The collapsed "additional properties" section hides overflow properties
+      // behind a toggle. A deep link to one of them must still reveal it.
+      scrollTargetId.value = 'root.overflowProp'
+
+      const wrapper = mount(Schema, {
+        props: {
+          schema: {
+            type: 'object',
+            properties: {
+              overflowProp: { type: 'string' },
+            },
+          },
+          breadcrumb: ['root'],
+          additionalProperties: true,
+          eventBus: null,
+          options: {},
+        },
+      })
+
+      expect(wrapper.text()).toContain('overflowProp')
+    })
+
+    it('does not expand unrelated collapsed disclosures', () => {
+      // A target for a different branch must not force this disclosure open.
+      scrollTargetId.value = 'root.somethingElse.bar'
+
+      const wrapper = mount(Schema, {
+        props: {
+          // This disclosure wraps the children of `foo` (breadcrumb root.foo).
+          schema: {
+            type: 'object',
+            properties: {
+              bar: { type: 'string' },
+            },
+          },
+          breadcrumb: ['root', 'foo'],
+          level: 1,
+          eventBus: null,
+          options: {},
+        },
+      })
+
+      expect(wrapper.text()).not.toContain('bar')
+    })
+  })
+
+  // See https://github.com/scalar/scalar/issues/8593
+  describe('factoring schemas', () => {
+    const renderText = (schema: unknown) =>
+      mount(Schema, {
+        props: {
+          options: { expandAllSchemaProperties: true },
+          eventBus: null,
+          schema: coerceValue(SchemaObjectSchema, schema),
+        },
+      }).text()
+
+    it('renders properties factored out alongside anyOf', () => {
+      const text = renderText({
+        type: 'object',
+        anyOf: [
+          { not: { required: ['another'] }, required: ['one'] },
+          { not: { required: ['one'] }, required: ['another'] },
+          { not: { required: ['one', 'another'] } },
+        ],
+        properties: {
+          one: { type: 'string', description: 'The one.' },
+          another: { type: 'string', description: 'Just another.' },
+        },
+      })
+
+      expect(text).toContain('one')
+      expect(text).toContain('another')
+    })
+
+    it('renders properties factored out alongside allOf containing anyOf', () => {
+      const text = renderText({
+        type: 'object',
+        allOf: [
+          {
+            anyOf: [
+              { not: { required: ['another'] }, required: ['one'] },
+              { not: { required: ['one'] }, required: ['another'] },
+              { not: { required: ['one', 'another'] } },
+            ],
+          },
+        ],
+        properties: {
+          one: { type: 'string' },
+          another: { type: 'string' },
+        },
+      })
+
+      expect(text).toContain('one')
+      expect(text).toContain('another')
+    })
+
+    it('renders object properties even when a not constraint is present', () => {
+      const text = renderText({
+        type: 'object',
+        properties: {
+          one: { type: 'string' },
+          another: { type: 'string' },
+        },
+        not: { required: ['one'] },
+      })
+
+      expect(text).toContain('one')
+      expect(text).toContain('another')
+    })
+
+    it('does not duplicate properties factored out alongside allOf', () => {
+      // `allOf` already merges the factored-out sibling `properties` into its
+      // rendered result, so they must not also render in a separate object
+      // block. Two members keep the `allOf` intact (a single member is flattened
+      // away before rendering).
+      const text = renderText({
+        type: 'object',
+        allOf: [{ properties: { fromAllOfA: { type: 'string' } } }, { properties: { fromAllOfB: { type: 'string' } } }],
+        properties: {
+          factoredProperty: { type: 'string' },
+        },
+      })
+
+      const countOccurrences = (haystack: string, needle: string) => haystack.split(needle).length - 1
+
+      expect(countOccurrences(text, 'factoredProperty')).toBe(1)
+      expect(countOccurrences(text, 'fromAllOfA')).toBe(1)
+      expect(countOccurrences(text, 'fromAllOfB')).toBe(1)
     })
   })
 })

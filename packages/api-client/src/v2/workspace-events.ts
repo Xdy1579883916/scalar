@@ -92,6 +92,13 @@ export function initializeWorkspaceEventHandlers({
       hooks,
     )(payload),
   )
+  eventBus.on('workspace:update:selected-example', (payload) =>
+    withHook(
+      'workspace:update:selected-example',
+      mutators.value.workspace().workspace.updateSelectedExample,
+      hooks,
+    )(payload),
+  )
   eventBus.on('workspace:update:active-environment', (payload) =>
     withHook(
       'workspace:update:active-environment',
@@ -171,6 +178,12 @@ export function initializeWorkspaceEventHandlers({
   eventBus.on('auth:update:selected-scopes', (payload) =>
     withHook('auth:update:selected-scopes', mutators.value.active().auth.updateSelectedScopes, hooks)(payload),
   )
+  eventBus.on('auth:upsert:scopes', (payload) =>
+    withHook('auth:upsert:scopes', mutators.value.active().auth.upsertScope, hooks)(payload),
+  )
+  eventBus.on('auth:delete:scopes', (payload) =>
+    withHook('auth:delete:scopes', mutators.value.active().auth.deleteScope, hooks)(payload),
+  )
   eventBus.on('auth:update:selected-security-schemes', (payload) =>
     withHook(
       'auth:update:selected-security-schemes',
@@ -223,6 +236,20 @@ export function initializeWorkspaceEventHandlers({
   )
   eventBus.on('server:update:selected', (payload) =>
     withHook('server:update:selected', mutators.value.active().server.updateSelectedServer, hooks)(payload),
+  )
+  eventBus.on('asyncapi-server:update:selected', (payload) =>
+    withHook(
+      'asyncapi-server:update:selected',
+      mutators.value.active().server.updateSelectedAsyncApiServer,
+      hooks,
+    )(payload),
+  )
+  eventBus.on('asyncapi-server:update:variables', (payload) =>
+    withHook(
+      'asyncapi-server:update:variables',
+      mutators.value.active().server.updateAsyncApiServerVariables,
+      hooks,
+    )(payload),
   )
 
   //------------------------------------------------------------------------------------

@@ -19,17 +19,14 @@ export default {
 </script>
 
 <script setup lang="ts">
-import { HttpMethod as HttpMethodBadge } from '@scalar/api-client/blocks/operation-code-sample'
 import {
   CommandActionForm,
   CommandActionInput,
 } from '@scalar/api-client/features/command-palette'
-import {
-  ScalarButton,
-  ScalarDropdown,
-  ScalarDropdownItem,
-  ScalarIcon,
-} from '@scalar/components'
+import { HttpMethod as HttpMethodBadge } from '@scalar/blocks/code-example'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarDropdown, ScalarDropdownItem } from '@scalar/components/dropdown'
+import { ScalarIcon } from '@scalar/components/icon'
 import type { HttpMethod } from '@scalar/helpers/http/http-methods'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
@@ -38,6 +35,7 @@ import type {
   TraversedExample,
   TraversedOperation,
 } from '@scalar/workspace-store/schemas/navigation'
+import { isOpenApiDocument } from '@scalar/workspace-store/schemas/type-guards'
 import { computed, ref, watch, type ComputedRef } from 'vue'
 
 import { useCommandPaletteDocumentSelection } from '../hooks/use-command-palette-document-selection'
@@ -136,7 +134,7 @@ const availableOperations = computed(() => {
 
   const document =
     workspaceStore.workspace.documents[selectedDocumentName.value]
-  if (!document || !document['x-scalar-navigation']) {
+  if (!isOpenApiDocument(document) || !document['x-scalar-navigation']) {
     return []
   }
 

@@ -8,8 +8,9 @@ import { extractServerFromPath } from '@scalar/helpers/url/extract-server-from-p
 import { type ThemeId, presets } from '@scalar/themes'
 import type { Oauth2Flow } from '@scalar/types/entities'
 import { createWorkspaceStore } from '@scalar/workspace-store/client'
+import { setPathItemOperation } from '@scalar/workspace-store/helpers/for-each-path-item-operation'
 import { type Auth, AuthSchema } from '@scalar/workspace-store/entities/auth'
-import { createWorkspaceStorePersistence } from '@scalar/workspace-store/persistence'
+import { createWorkspaceStorePersistence, generateWorkspaceUid } from '@scalar/workspace-store/persistence'
 import {
   type XScalarEnvironments,
   xScalarEnvironmentSchema,
@@ -17,6 +18,7 @@ import {
 import { xScalarCookieSchema } from '@scalar/workspace-store/schemas/extensions/general/x-scalar-cookies'
 import type { XTagGroup } from '@scalar/workspace-store/schemas/extensions/tag'
 import type { InMemoryWorkspace } from '@scalar/workspace-store/schemas/inmemory-workspace'
+import { isOpenApiDocument } from '@scalar/workspace-store/schemas/type-guards'
 import { coerceValue } from '@scalar/workspace-store/schemas/typebox-coerce'
 import type {
   OperationObject,
@@ -77,12 +79,22 @@ export const migrateLocalStorageToIndexDb = async () => {
 
     const limit = createLimiter(MAX_CONCURRENT_DB_WRITES)
 
-    // Step 3: Save to IndexedDB
+    // Step 3: Save to IndexedDB. Every migrated workspace is keyed by a
+    // fresh `workspaceUid` and lands under the local team — legacy
+    // installs predate the team concept, so there is no team membership
+    // to preserve. The slug from legacy data becomes the URL-facing slug
+    // and is unique within the local team by construction (it derives
+    // from the legacy workspace UID).
     await Promise.all(
       workspaces.map((workspace) =>
         limit(() =>
           workspacePersistence.setItem(
-            { teamSlug: 'local', slug: workspace.slug },
+            {
+              workspaceUid: generateWorkspaceUid(),
+              teamUid: 'local',
+              teamSlug: 'local',
+              slug: workspace.slug,
+            },
             {
               name: workspace.name,
               workspace: workspace.workspace,
@@ -262,11 +274,13 @@ export const transformLegacyDataToWorkspace = async (legacyData: {
 
         const drafts = store.workspace.documents[DRAFTS_DOCUMENT_NAME]
 
-        if (drafts) {
+        // The drafts document is always OpenAPI-shaped (constructed above with `paths`); the
+        // guard narrows the WorkspaceDocument union so we can access `.paths` safely.
+        if (isOpenApiDocument(drafts)) {
           // Make sure the drafts document has a GET / route cuz that's the first route we navigate the user to
           drafts.paths ??= {}
           drafts.paths['/'] ??= {}
-          drafts.paths['/']['get'] ??= {}
+          setPathItemOperation(drafts.paths['/'], 'get', {})
         }
 
         store.buildSidebar(DRAFTS_DOCUMENT_NAME)

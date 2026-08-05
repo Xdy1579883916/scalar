@@ -5,14 +5,17 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
 
+import { assertScalarAppEnvPlugin } from './assert-scalar-app-env-plugin'
+import { devLocalhostCspPlugin } from './dev-localhost-csp-plugin'
 import { scalarAppMonacoEditorPluginOptions } from './monaco-vite-plugin-options'
 import packageJson from './package.json' with { type: 'json' }
 
 const { version: scalarAppVersion } = packageJson
+const envDir = resolve('.')
 
 export default defineConfig({
   root: resolve('entrypoints/web'),
-  envDir: resolve('.'),
+  envDir,
   define: {
     OVERRIDE_PACKAGE_VERSION: JSON.stringify(scalarAppVersion),
   },
@@ -29,16 +32,31 @@ export default defineConfig({
     exclude: ['monaco-editor', 'monaco-yaml'],
   },
   publicDir: resolve('public-web'),
-  plugins: [vue(), tailwindcss(), monacoEditorPlugin(scalarAppMonacoEditorPluginOptions)],
+  plugins: [
+    assertScalarAppEnvPlugin(envDir),
+    vue(),
+    tailwindcss(),
+    monacoEditorPlugin(scalarAppMonacoEditorPluginOptions),
+    devLocalhostCspPlugin(),
+  ],
   build: {
     outDir: resolve('dist/web'),
     rolldownOptions: {
-      input: resolve('entrypoints/web/index.html'),
+      input: {
+        index: resolve('entrypoints/web/index.html'),
+        // Isolated realm that runs pre/post-request scripts (postman-sandbox) with its own CSP.
+        sandbox: resolve('entrypoints/web/sandbox.html'),
+      },
     },
   },
   server: {
     port: 5065,
     // E2E: browsers in Docker hit the host Vite server with this Host header (see playwright.config baseURL).
+    allowedHosts: ['host.docker.internal'],
+  },
+  preview: {
+    // E2E pre-builds the app and serves it with `vite preview`; browsers in Docker reach it with
+    // this Host header (see playwright.config baseURL), so it must be allowed here too.
     allowedHosts: ['host.docker.internal'],
   },
 })

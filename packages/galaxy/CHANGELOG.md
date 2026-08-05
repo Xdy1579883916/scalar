@@ -1,5 +1,54 @@
 # @scalar/galaxy
 
+## 0.6.12
+
+### Patch Changes
+
+- [#9697](https://github.com/scalar/scalar/pull/9697): Add credential input UIs for the AsyncAPI broker-specific security scheme types, which previously showed a "not supported yet" message in the Authentication selector. The SASL-style schemes (`userPassword`, `plain`, `scramSha256`, `scramSha512`) get a username + password form like HTTP basic, `X509` gets client certificate + private key (PEM) inputs, `symmetricEncryption`/`asymmetricEncryption` get a single key input, and `gssapi` gets a service name input. The entered credentials are persisted in the auth store with new type-specific secret shapes (`x-scalar-secret-client-certificate`, `x-scalar-secret-private-key`, `x-scalar-secret-service-name`, plus the existing username/password/token extensions) and round-trip through the merged scheme objects the same way as the OpenAPI types. The Galaxy AsyncAPI sample document now defines one scheme of each broker group so the inputs can be exercised.
+
+## 0.6.11
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.6.10
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.6.9
+
+### Patch Changes
+
+- [#9651](https://github.com/scalar/scalar/pull/9651): Merge the Galaxy `Paginated` and `PaginatedResource` schemas into a single `PaginatedResource` schema
+
+## 0.6.8
+
+### Patch Changes
+
+- [#9468](https://github.com/scalar/scalar/pull/9468): Express the `/planets` pagination with a generic `Paginated` template that binds its item type through a JSON Schema 2020-12 `$dynamicRef` / `$dynamicAnchor`, demonstrating the `Paginated<T>` pattern
+
+## 0.6.7
+
+### Patch Changes
+
+- [#9455](https://github.com/scalar/scalar/pull/9455): Add a description to the `Create a celestial body` operation
+
+## 0.6.6
+
+### Patch Changes
+
+- [#9434](https://github.com/scalar/scalar/pull/9434): Flesh out the AsyncAPI example document so it covers more of the spec: a document `id`, operation trait tags, channel summaries, richer channel parameters (enum/default/examples/location), summary/messages/reply on every operation, a request/reply example (`getPlanet`) including a runtime-expression reply address, a reusable message trait with headers and a correlation ID, server variables, and a wired-up OAuth 2.0 scheme
+- [#9379](https://github.com/scalar/scalar/pull/9379): Add a `lint` script and a local Spectral ruleset (`galaxy.ruleset.yaml`) so the example document can be linted with `@scalar/cli document lint`
+
+## 0.6.5
+
+### Patch Changes
+
+- [#9349](https://github.com/scalar/scalar/pull/9349): Tag channels, operations, and messages in the AsyncAPI 3.0 sample so they group consistently with the OpenAPI document.
+
 ## 0.6.4
 
 ### Patch Changes

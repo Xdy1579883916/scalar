@@ -15,6 +15,44 @@ const configuration = {
 }
 ```
 
+## Loading a Plugin from a URL
+
+When you use the standalone browser build (`Scalar.createApiReference`), you can also reference plugins by URL.
+Each entry in `pluginUrls` must point to an ESM module that exports a plugin (the same shape as the `plugins`
+entries) as its default export. The modules are imported before the API reference mounts and their default
+exports are registered alongside the plugins passed directly.
+
+```typescript
+const configuration = {
+  url: 'https://registry.scalar.com/@scalar/apis/galaxy?format=json',
+  pluginUrls: [
+    'https://cdn.jsdelivr.net/npm/@example/scalar-plugin/dist/plugin.js',
+  ],
+}
+```
+
+Unlike `plugins`, this option is JSON-serializable. That makes it possible to load plugins from integrations
+that pass their configuration as JSON — for example the Docker container (`API_REFERENCE_CONFIG`) or server-side
+integrations that render the configuration into the HTML — without replacing the whole bundle.
+
+> [!WARNING]
+> Each URL is imported and executed as a JavaScript module in the browser, so it runs with the same privileges
+> as the page hosting the API reference. Only reference `pluginUrls` you control or fully trust — treat them like
+> any other `<script>` you add to your site, and prefer pinning a specific version rather than a floating tag.
+
+A minimal plugin module looks like this:
+
+```typescript
+// plugin.js — served as an ESM module
+export default () => ({
+  name: 'my-custom-plugin',
+  extensions: [],
+})
+```
+
+Note: When you render the `ApiReference` component yourself (for example in a Vue app), import the plugin
+and pass it via `plugins` instead.
+
 ## Creating a Plugin
 
 ### Specification Extensions
@@ -89,8 +127,8 @@ Plugins can hook into the API Reference lifecycle to run code at specific points
 
 #### Available Hooks
 
-- `onInit({ config })` — Called when the API Reference is initialized. Receives the resolved configuration.
-- `onConfigChange({ config })` — Called when the API Reference configuration changes.
+- `onInit({ config, auth })` — Called when the API Reference is initialized. Receives the resolved configuration and the [authentication state](#reading-the-authentication-state).
+- `onConfigChange({ config, auth })` — Called when the API Reference configuration changes.
 - `onDestroy()` — Called when the API Reference is destroyed. Use for cleanup.
 
 #### Example
@@ -119,13 +157,80 @@ export const AnalyticsPlugin = (): ApiReferencePlugin => {
 }
 ```
 
+### Reading the Authentication State
+
+Plugins can read the global authentication state — the secrets the user has entered (tokens, API keys, OAuth credentials) and the selected security schemes. This is **read-only**; plugins cannot mutate auth.
+
+The auth accessor exposes three methods:
+
+| Method | Description |
+|---|---|
+| `export()` | Returns a snapshot of the entire authentication state, keyed by document name. |
+| `getAuthSecrets(documentName, schemeName)` | Returns the stored secrets for a security scheme within a document, or `undefined`. |
+| `getAuthSelectedSchemas(payload)` | Returns the selected security for a document (`{ type: 'document', documentName }`) or operation (`{ type: 'operation', documentName, path, method }`), or `undefined`. |
+
+#### From lifecycle hooks
+
+The `auth` accessor is passed to `onInit` and `onConfigChange` alongside `config`:
+
+```typescript
+import type { ApiReferencePlugin } from '@scalar/types/api-reference'
+
+export const AuthAwarePlugin = (): ApiReferencePlugin => {
+  return () => {
+    return {
+      name: 'auth-aware-plugin',
+      extensions: [],
+      hooks: {
+        onConfigChange({ auth }) {
+          // Read the secrets the user entered for a specific scheme
+          const secrets = auth.getAuthSecrets('my-document', 'bearerAuth')
+          console.log('Current bearer token', secrets?.token)
+
+          // Or grab a full snapshot of every document's auth state
+          console.log('All auth state', auth.export())
+        },
+      },
+    }
+  }
+}
+```
+
+#### From a view component
+
+View components can reach the same accessor through the plugin manager:
+
+```typescript
+import { usePluginManager } from '@scalar/api-reference/plugins'
+
+const pluginManager = usePluginManager()
+const auth = pluginManager.getAuthState()
+
+const selected = auth.getAuthSelectedSchemas({ type: 'document', documentName: 'my-document' })
+```
+
 ### Additional Components
 
 Plugins can inject components at specific locations in the API Reference using views.
 
 #### Available Views
 
+- `content.start` - Before the Introduction/Info section
 - `content.end` - After the Models section
+
+#### Sidebar Visibility
+
+View components can optionally appear in the sidebar. Add a `sidebar` configuration to control this. Clicking the entry scrolls to the component, and the entry highlights as it scrolls into view, just like the built-in sections.
+
+```typescript
+{
+  component: CustomComponent,
+  sidebar: {
+    show: true,       // true = visible in sidebar, false/omitted = hidden
+    label: 'My Page', // Display text in the sidebar
+  },
+}
+```
 
 #### Example
 
@@ -139,9 +244,20 @@ export const FeedbackPlugin = (): ApiReferencePlugin => {
       name: 'feedback-plugin',
       extensions: [],
       views: {
+        'content.start': [
+          {
+            component: CustomComponent,
+            // Show in sidebar
+            sidebar: {
+              show: true,
+              label: 'Getting Started',
+            },
+          },
+        ],
         'content.end': [
           {
             component: CustomComponent,
+            // Not shown in sidebar (omitted)
           },
         ],
       },
@@ -172,6 +288,34 @@ export const FeedbackPlugin = (): ApiReferencePlugin => {
           {
             component: CustomComponent,
             renderer: ReactRenderer,
+          },
+        ],
+      },
+    }
+  }
+}
+```
+
+With sidebar visibility:
+
+```typescript
+import { ReactRenderer } from '@scalar/react-renderer'
+import { CustomComponent } from './components/CustomComponent'
+
+export const FeedbackPlugin = (): ApiReferencePlugin => {
+  return () => {
+    return {
+      name: 'feedback-plugin',
+      extensions: [],
+      views: {
+        'content.start': [
+          {
+            component: CustomComponent,
+            renderer: ReactRenderer,
+            sidebar: {
+              show: true,
+              label: 'Support',
+            },
           },
         ],
       },
@@ -258,10 +402,68 @@ Each handler in `responseBody` supports:
 
 Plugins can hook into the request lifecycle:
 
+### `onRequestMount`
+
+Runs when an operation view mounts, before any request is sent. Use it to warm up resources.
+
+| Field | Type | Description |
+|---|---|---|
+| `document` | `OpenApiDocument` | The current OpenAPI document. |
+| `operation` | `OperationObject` | The current operation. |
+
+### `beforeRequest`
+
+Runs before the fetch `Request` is built. Mutate `requestBuilder` to change the outgoing request.
+
+| Field | Type | Description |
+|---|---|---|
+| `requestBuilder` | `RequestFactory` | The mutable request builder. Change its method, path, query, headers, body, or security before the request is built. |
+| `document` | `OpenApiDocument` | The current OpenAPI document. |
+| `operation` | `OperationObject` | The current operation. |
+| `variablesStore?` | `VariablesStore` | The request variable store. |
+| `server?` | `ServerObject \| null` | The optional active [OpenAPI Server Object](https://spec.openapis.org/oas/v3.1.1.html#server-object) selected for the request. Its `url` can be relative or include server variables, so resolve it for the plugin's runtime before making network calls. |
+| `customFetch?` | `typeof fetch` | The optional host-provided fetch implementation configured for the API client. Use it for plugin-owned network calls so they use the same network channel as the request, including the desktop app's IPC-backed fetch. |
+
+### `requestBuilt`
+
+Runs after the fetch `Request` is built, immediately before it is sent. Outside Electron, mutate `request.headers` to change the outgoing request; its body matches the bytes sent over the wire. In Electron, Scalar sends the request payload through `customFetch` instead, so mutations to `request` do not apply and multipart body bytes can differ.
+
+| Field | Type | Description |
+|---|---|---|
+| `request` | `Request` | The request built before sending. Outside Electron it is sent as-is; Electron sends the request payload through `customFetch` instead. |
+| `requestBuilder` | `RequestFactory` | The builder used to create `request`. Mutating it at this stage does not change the outgoing request. |
+| `document` | `OpenApiDocument` | The current OpenAPI document. |
+| `operation` | `OperationObject` | The current operation. |
+| `variablesStore?` | `VariablesStore` | The request variable store. |
+
+### `responseReceived`
+
+Runs after a response is received.
+
+| Field | Type | Description |
+|---|---|---|
+| `response` | `Response` | The received response. |
+| `request` | `Request` | A request rebuilt from the sent request payload. It is not the same instance as the sent request; header mutations from `requestBuilt` are absent and multipart body bytes can differ. |
+| `requestBuilder` | `RequestFactory` | The builder used to create `request`. Mutating it does not change the already-sent request. |
+| `document` | `OpenApiDocument` | The current OpenAPI document. |
+| `operation` | `OperationObject` | The current operation. |
+| `variablesStore?` | `VariablesStore` | The request variable store. |
+
+### Example
+
 ```typescript
-const loggingPlugin: ClientPlugin = {
+const authPlugin: ClientPlugin = {
   hooks: {
-    beforeRequest: ({ requestBuilder }) => {
+    beforeRequest: async ({ requestBuilder, server, customFetch }) => {
+      console.log('Active server configuration:', server?.url)
+
+      if (customFetch) {
+        // Resolve an absolute URL appropriate for the plugin's runtime.
+        await customFetch('https://auth.example.com/session/refresh', {
+          method: 'POST',
+        })
+      }
+
       requestBuilder.headers.set('X-Custom-Header', 'value')
     },
     responseReceived: ({ response }) => {

@@ -3,6 +3,7 @@ package com.scalar.maven.core;
 import com.scalar.maven.core.authentication.ScalarAuthenticationOptions;
 import com.scalar.maven.core.config.DefaultHttpClient;
 import com.scalar.maven.core.config.ScalarAgentOptions;
+import com.scalar.maven.core.config.ScalarMcpOptions;
 import com.scalar.maven.core.config.ScalarServer;
 import com.scalar.maven.core.config.ScalarSource;
 import com.scalar.maven.core.enums.*;
@@ -101,6 +102,14 @@ public class ScalarProperties {
      * Defaults to null.
      */
     private String customCss;
+
+    /**
+     * URLs of ESM modules that provide additional API Reference plugins.
+     * Each module is imported in the browser before the API Reference mounts,
+     * and its default export is registered as a plugin.
+     * Defaults to null.
+     */
+    private List<String> pluginUrls;
 
     /**
      * Whether to show the sidebar search bar.
@@ -216,6 +225,32 @@ public class ScalarProperties {
      * Defaults to false (shown).
      */
     private boolean hideClientButton = false;
+
+    /**
+     * Controls the label for the components.schemas section in the sidebar,
+     * content, and search. Use "Schemas" for OpenAPI terminology; "Models" is
+     * the default when left unset.
+     */
+    private String modelsSectionLabel;
+
+    /**
+     * Controls whether all nested schema properties are expanded by default.
+     * Defaults to false (collapsed).
+     */
+    private boolean expandAllSchemaProperties = false;
+
+    /**
+     * Controls whether the first tag is opened when the URL does not target a
+     * specific section.
+     * Defaults to true.
+     */
+    private boolean defaultOpenFirstTag = true;
+
+    /**
+     * Controls the MCP (Model Context Protocol) integration. When provided,
+     * users can connect the API Reference to MCP-compatible tools.
+     */
+    private ScalarMcpOptions mcp;
 
     // Primary enum properties (no suffix)
 
@@ -359,6 +394,14 @@ public class ScalarProperties {
 
     public void setCustomCss(String customCss) {
         this.customCss = customCss;
+    }
+
+    public List<String> getPluginUrls() {
+        return pluginUrls;
+    }
+
+    public void setPluginUrls(List<String> pluginUrls) {
+        this.pluginUrls = pluginUrls;
     }
 
     public boolean isHideSearch() {
@@ -591,6 +634,38 @@ public class ScalarProperties {
 
     public void setAgent(ScalarAgentOptions agent) {
         this.agent = agent;
+    }
+
+    public String getModelsSectionLabel() {
+        return modelsSectionLabel;
+    }
+
+    public void setModelsSectionLabel(String modelsSectionLabel) {
+        this.modelsSectionLabel = modelsSectionLabel;
+    }
+
+    public boolean isExpandAllSchemaProperties() {
+        return expandAllSchemaProperties;
+    }
+
+    public void setExpandAllSchemaProperties(boolean expandAllSchemaProperties) {
+        this.expandAllSchemaProperties = expandAllSchemaProperties;
+    }
+
+    public boolean isDefaultOpenFirstTag() {
+        return defaultOpenFirstTag;
+    }
+
+    public void setDefaultOpenFirstTag(boolean defaultOpenFirstTag) {
+        this.defaultOpenFirstTag = defaultOpenFirstTag;
+    }
+
+    public ScalarMcpOptions getMcp() {
+        return mcp;
+    }
+
+    public void setMcp(ScalarMcpOptions mcp) {
+        this.mcp = mcp;
     }
 }
 

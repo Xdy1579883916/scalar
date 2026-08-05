@@ -1,18 +1,32 @@
 <script lang="ts" setup>
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
-import { ScalarIcon, ScalarMarkdown } from '@scalar/components'
+import { ScalarIcon } from '@scalar/components/icon'
+import { ScalarMarkdown } from '@scalar/components/markdown'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
+import { pushDynamicScope } from '@scalar/workspace-store/helpers/dynamic-ref'
+import { resolve } from '@scalar/workspace-store/resolve'
 import type {
   DiscriminatorObject,
   SchemaObject,
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
-import { computed } from 'vue'
+import { computed, inject, provide } from 'vue'
 
 import type { SchemaOptions } from '@/components/Content/Schema/types'
 import ScreenReader from '@/components/ScreenReader.vue'
+import { useLocalization } from '@/features/localization'
+import { scrollTargetId } from '@/helpers/lazy-bus'
 
+import {
+  resolveDynamicSchema,
+  SCHEMA_DYNAMIC_SCOPE_SYMBOL,
+  useDynamicScope,
+} from './helpers/dynamic-scope'
+import { inferDiscriminatorMappingComposition } from './helpers/get-compositions-to-render'
 import { isEmptySchemaObject } from './helpers/is-empty-schema-object'
 import { isTypeObject } from './helpers/is-type-object'
+import { mergeAllOfSchemas } from './helpers/merge-all-of-schemas'
+import { SCHEMA_ANCESTORS_SYMBOL } from './helpers/schema-cycle'
+import SchemaComposition from './SchemaComposition.vue'
 import SchemaHeading from './SchemaHeading.vue'
 import SchemaObjectProperties from './SchemaObjectProperties.vue'
 import SchemaProperty from './SchemaProperty.vue'
@@ -32,6 +46,7 @@ const {
   options,
   schemaContext,
   compositionPath,
+  cycleKey,
 } = defineProps<{
   schema?: SchemaObject
   /** Track how deep we've gone */
@@ -62,58 +77,191 @@ const {
   schemaContext?: string
   /** Internal path used to sync nested request body compositions with the code sample */
   compositionPath?: string[]
+  /**
+   * Stable identity of this schema node, derived from its raw (unresolved)
+   * value by the parent. Used to detect self-referential cycles. See
+   * {@link getCycleKey}.
+   */
+  cycleKey?: unknown
 }>()
+const { translate } = useLocalization()
+
+/**
+ * The dynamic scope inherited from ancestor schema resources.
+ *
+ * Used to bind JSON Schema 2020-12 `$dynamicRef`s to the active `$dynamicAnchor` while walking the
+ * tree. Empty at the root. See {@link useDynamicScope}.
+ */
+const dynamicScope = useDynamicScope()
+
+/**
+ * The schema this node actually renders.
+ *
+ * Two normalizations happen here, both no-ops for ordinary schemas:
+ * - A top-level `$dynamicRef` is bound to its concrete type via the inherited dynamic scope.
+ * - A resource that extends a template through a root `$ref` (JSON Schema 2020-12 `$ref` alongside
+ *   `$defs`, e.g. a `PaginatedResponse` binding) is merged so its inherited properties render.
+ */
+const resolvedSchema = computed((): SchemaObject | undefined => {
+  if (!schema || typeof schema !== 'object') {
+    return schema
+  }
+
+  const bound = resolveDynamicSchema(schema, dynamicScope)
+  return '$ref' in bound ? resolve.schema(bound) : bound
+})
+
+/**
+ * Re-provide the dynamic scope grown with this resource so nested `$dynamicRef`s bind here.
+ *
+ * Built once at setup from the resource's stable identity (like the ancestor set below);
+ * `pushDynamicScope` only grows the scope for schemas that can carry a `$dynamicAnchor`.
+ *
+ * The raw schema is pushed, not the merged {@link resolvedSchema}: merging through `resolve.schema`
+ * coerces the node and drops the resolved `$ref-value` from entries inside `$defs`, which
+ * `$dynamicAnchor` resolution relies on to dereference the bound type (e.g. `User`).
+ */
+const scopeSchema = schema
+  ? resolveDynamicSchema(schema, dynamicScope)
+  : undefined
+provide(
+  SCHEMA_DYNAMIC_SCOPE_SYMBOL,
+  scopeSchema ? pushDynamicScope(dynamicScope, scopeSchema) : dynamicScope,
+)
+
+/**
+ * Cycle-safe `expandAllSchemaProperties`.
+ *
+ * We track ancestor schema keys along the current render path. A node is
+ * treated as cyclic when its key is already present in the ancestor set, which
+ * indicates that rendering has looped back onto a self-referential schema.
+ *
+ * This lets us default-expand finite branches while stopping automatic
+ * expansion only at cycle boundaries, preventing infinite recursion.
+ */
+const ancestors = inject(SCHEMA_ANCESTORS_SYMBOL, undefined)
+
+const isCyclic = computed(
+  (): boolean => cycleKey != null && !!ancestors?.has(cycleKey),
+)
+
+// Re-provide the ancestor set augmented with this node so descendants can
+// detect cycles back to it. Built once at setup; a node's key is stable.
+const childAncestors = new Set<unknown>(ancestors ?? [])
+if (cycleKey != null) {
+  childAncestors.add(cycleKey)
+}
+provide(SCHEMA_ANCESTORS_SYMBOL, childAncestors)
+
+const shouldForceExpand = computed(
+  (): boolean => !!options.expandAllSchemaProperties && !isCyclic.value,
+)
 
 /**
  * Determines whether to show the collapse/expand toggle button.
  * We hide the toggle for non-collapsible schemas and root-level schemas.
  */
-const shouldShowToggle = computed((): boolean => {
-  return !noncollapsible && level > 0
+const shouldShowToggle = computed((): boolean => !noncollapsible && level > 0)
+
+/**
+ * Whether this schema sits on the path to the current anchor/scroll target.
+ *
+ * Property anchors are dot-joined breadcrumbs, so every disclosure that wraps
+ * the target has a breadcrumb that is a prefix of the target id. Opening those
+ * disclosures is what makes deep links to collapsed (hidden) properties work
+ * without forcing every schema open via `expandAllSchemaProperties`.
+ */
+const isOnScrollTargetPath = computed((): boolean => {
+  if (!breadcrumb?.length) {
+    return false
+  }
+  const path = breadcrumb.join('.')
+  const target = scrollTargetId.value
+  return target === path || target.startsWith(`${path}.`)
 })
+
+/**
+ * Whether the disclosure starts expanded. Non-collapsible schemas are always
+ * open. When `expandAllSchemaProperties` is enabled, finite branches start
+ * expanded by default while cyclic branches remain collapsed to avoid recursion
+ * loops. We also open any disclosure on the path to the current scroll target so
+ * deep links resolve even when the property is collapsed.
+ *
+ * Note: the Disclosure only reads this at mount, so it expands collapsed
+ * properties on a fresh navigation (the schema mounts after the target is set),
+ * not when the target changes for an already-mounted disclosure.
+ */
+const defaultOpen = computed(
+  (): boolean =>
+    noncollapsible || shouldForceExpand.value || isOnScrollTargetPath.value,
+)
+
+const childAttributesLabel = computed(
+  (): string => schema?.title ?? translate('schema.childAttributes'),
+)
 
 /** Gets the description to show for the schema */
 const schemaDescription = computed(() => {
+  const value = resolvedSchema.value
+
   if (hideDescription) {
     return null
   }
 
-  // For the request body we want to show the base description or the first allOf schema description
+  // For the request body we want to show the description of the merged allOf schema.
+  // Merging keeps the base description (when set) and otherwise lets the last allOf
+  // member win, matching how the merged composition is rendered below. The nested
+  // merged Schema in `SchemaComposition` hides its own description in this case so
+  // the text is not rendered twice.
   if (schema?.allOf && schema.allOf.length > 0 && name === 'Request Body') {
-    return schema.description || schema.allOf[0]?.description || null
+    return mergeAllOfSchemas(schema)?.description || null
   }
 
   // Don't show description if there's no description or it's not a string
-  if (!schema?.description || typeof schema.description !== 'string') {
+  if (!value?.description || typeof value.description !== 'string') {
     return null
   }
 
   // Don't show description for enum schemas (they have special handling)
-  if (schema.enum) {
+  if (value.enum) {
     return null
   }
 
   // Will be shown in the properties anyway
   if (
-    !('properties' in schema) &&
-    !('patternProperties' in schema) &&
-    !('additionalProperties' in schema)
+    !('properties' in value) &&
+    !('patternProperties' in value) &&
+    !('additionalProperties' in value)
   ) {
     return null
   }
 
   // Return the schema's own description
-  return schema.description
+  return value.description
 })
 
+/**
+ * Infer a selector for mapped discriminators that do not declare `oneOf`.
+ * Threaded discriminators skip inference to avoid recursive allOf variants.
+ */
+const inferredDiscriminatorComposition = computed(() =>
+  schema && !discriminator && isTypeObject(schema)
+    ? inferDiscriminatorMappingComposition(schema, options.document)
+    : null,
+)
+
 // Prevent click action if noncollapsible
-const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
+const handleClick = (e: MouseEvent) => {
+  if (noncollapsible) {
+    e.stopPropagation()
+  }
+}
 </script>
 <template>
   <Disclosure
-    v-if="typeof schema === 'object' && Object.keys(schema).length"
+    v-if="resolvedSchema && Object.keys(resolvedSchema).length"
     v-slot="{ open }"
-    :defaultOpen="noncollapsible">
+    :defaultOpen="defaultOpen">
     <div
       class="schema-card"
       :class="[
@@ -128,9 +276,9 @@ const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
         <ScalarMarkdown :value="schemaDescription" />
       </div>
       <div
-        v-if="isEmptySchemaObject(schema)"
+        v-if="isEmptySchemaObject(resolvedSchema)"
         class="pt-2">
-        Empty object
+        {{ translate('schema.emptyObject') }}
       </div>
       <div
         class="schema-properties"
@@ -150,8 +298,10 @@ const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
               class="schema-card-title-icon"
               icon="Add"
               size="sm" />
-            Show additional properties
-            <ScreenReader v-if="name">for {{ name }}</ScreenReader>
+            {{ translate('schema.showAdditionalProperties') }}
+            <ScreenReader v-if="name">
+              {{ translate('schema.forName', { name }) }}
+            </ScreenReader>
           </DisclosureButton>
         </div>
 
@@ -172,12 +322,22 @@ const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
               icon="Add"
               size="sm" />
             <template v-if="open">
-              Hide {{ schema?.title ?? 'Child Attributes' }}
+              {{
+                translate('schema.hideChildAttributes', {
+                  name: childAttributesLabel,
+                })
+              }}
             </template>
             <template v-else>
-              Show {{ schema?.title ?? 'Child Attributes' }}
+              {{
+                translate('schema.showChildAttributes', {
+                  name: childAttributesLabel,
+                })
+              }}
             </template>
-            <ScreenReader v-if="name">for {{ name }}</ScreenReader>
+            <ScreenReader v-if="name">
+              {{ translate('schema.forName', { name }) }}
+            </ScreenReader>
           </template>
           <template v-else>
             <ScalarIcon
@@ -186,17 +346,33 @@ const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
               icon="Add"
               size="sm" />
             <SchemaHeading
-              :name="schema?.title ?? name"
-              :value="schema" />
+              :name="resolvedSchema?.title ?? name"
+              :value="resolvedSchema" />
           </template>
         </DisclosureButton>
         <DisclosurePanel
           v-if="!additionalProperties || open"
           as="ul"
           :static="!shouldShowToggle">
+          <!-- Variant selector inferred from a discriminator mapping -->
+          <SchemaComposition
+            v-if="inferredDiscriminatorComposition"
+            :breadcrumb
+            :compact
+            composition="oneOf"
+            :compositionPath="compositionPath"
+            :discriminator="schema?.discriminator"
+            :eventBus="eventBus"
+            :hideHeading
+            :hideModelNames
+            :level="level"
+            :name="name"
+            :options
+            :schema="inferredDiscriminatorComposition"
+            :schemaContext="schemaContext" />
           <!-- Object properties -->
           <SchemaObjectProperties
-            v-if="isTypeObject(schema)"
+            v-else-if="isTypeObject(resolvedSchema)"
             :breadcrumb
             :compact
             :compositionPath="compositionPath"
@@ -206,21 +382,22 @@ const handleClick = (e: MouseEvent) => noncollapsible && e.stopPropagation()
             :hideModelNames
             :level="level + 1"
             :options
-            :schema
+            :schema="resolvedSchema"
             :schemaContext="schemaContext" />
           <!-- Not an object -->
           <template v-else>
             <SchemaProperty
-              v-if="schema"
+              v-if="resolvedSchema"
               :breadcrumb
               :compact
               :compositionPath="compositionPath"
+              :discriminator
               :eventBus="eventBus"
               :hideHeading
               :hideModelNames
               :level
               :options
-              :schema
+              :schema="resolvedSchema"
               :schemaContext="schemaContext" />
           </template>
         </DisclosurePanel>

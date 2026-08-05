@@ -1,10 +1,41 @@
 import type { OperationEvents } from '@/events/definitions/operation'
-import { getResolvedRef } from '@/helpers/get-resolved-ref'
+import { getPathItemOperation } from '@/helpers/for-each-path-item-operation'
+import { type NodeInput, getResolvedRef } from '@/helpers/get-resolved-ref'
 import { unpackProxyObject } from '@/helpers/unpack-proxy'
 import type { WorkspaceDocument } from '@/schemas'
 import type { DisableParametersConfig } from '@/schemas/extensions/operation/x-scalar-disable-parameters'
+import { isOpenApiDocument } from '@/schemas/type-guards'
 import type { ExampleObject } from '@/schemas/v3.1/strict/example'
+import type { ParameterObject } from '@/schemas/v3.1/strict/parameter'
+import type { PathItemObject } from '@/schemas/v3.1/strict/path-item'
 import type { ReferenceType } from '@/schemas/v3.1/strict/reference'
+
+const getPathItemsForParameterMutation = (pathItemRef: NodeInput<PathItemObject> | undefined): PathItemObject[] => {
+  if (!pathItemRef || typeof pathItemRef !== 'object') {
+    return []
+  }
+
+  if ('$ref' in pathItemRef) {
+    const targets: PathItemObject[] = []
+    const refWrapper = pathItemRef as PathItemObject & {
+      $ref: string
+      '$ref-value': PathItemObject
+    }
+
+    if (refWrapper.parameters !== undefined) {
+      targets.push(refWrapper)
+    }
+
+    const resolved = getResolvedRef(pathItemRef)
+    if (resolved) {
+      targets.push(resolved)
+    }
+
+    return targets
+  }
+
+  return [pathItemRef]
+}
 
 /**
  * Updates an existing parameter of a given `type` by its index within that
@@ -52,7 +83,10 @@ export const upsertOperationParameter = (
   }
 
   // We are adding a new parameter
-  const operation = getResolvedRef(document?.paths?.[meta.path]?.[meta.method])
+  if (!isOpenApiDocument(document)) {
+    return
+  }
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method))
   if (!operation) {
     console.error('Operation not found', { meta, document })
     return
@@ -98,12 +132,12 @@ export const updateOperationExtraParameters = (
   type In = OperationEvents['operation:update:extra-parameters']['in']
 
   // Ensure there's a valid document
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
   // Resolve the referenced operation from the document using the path and method
-  const operation = getResolvedRef(document.paths?.[meta.path]?.[meta.method])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method))
   if (!operation) {
     return
   }
@@ -156,7 +190,10 @@ export const deleteOperationParameter = (
   document: WorkspaceDocument | null,
   { meta, originalParameter }: OperationEvents['operation:delete:parameter'],
 ) => {
-  const operation = getResolvedRef(document?.paths?.[meta.path]?.[meta.method])
+  if (!isOpenApiDocument(document)) {
+    return
+  }
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method))
 
   // Lets check if its on the operation first as its more likely
   const operationIndex = operation?.parameters?.findIndex((it) => getResolvedRef(it) === originalParameter) ?? -1
@@ -170,15 +207,20 @@ export const deleteOperationParameter = (
     return
   }
 
-  // If it wasn't on the operation it might be on the path
-  const path = getResolvedRef(document?.paths?.[meta.path])
-  const pathIndex = path?.parameters?.findIndex((it) => getResolvedRef(it) === originalParameter) ?? -1
+  // If it wasn't on the operation it might be on the path (wrapper siblings or $ref-value)
+  for (const path of getPathItemsForParameterMutation(document.paths?.[meta.path])) {
+    const pathIndex =
+      path.parameters?.findIndex(
+        (parameter: ReferenceType<ParameterObject>) => getResolvedRef(parameter) === originalParameter,
+      ) ?? -1
 
-  if (path && pathIndex >= 0) {
-    path.parameters = unpackProxyObject(
-      path.parameters?.filter((_, i) => i !== pathIndex),
-      { depth: 1 },
-    )
+    if (pathIndex >= 0) {
+      path.parameters = unpackProxyObject(
+        path.parameters?.filter((_, i) => i !== pathIndex),
+        { depth: 1 },
+      )
+      return
+    }
   }
 }
 
@@ -199,11 +241,11 @@ export const deleteAllOperationParameters = (
   document: WorkspaceDocument | null,
   { meta, type }: OperationEvents['operation:delete-all:parameters'],
 ) => {
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
-  const operation = getResolvedRef(document.paths?.[meta.path]?.[meta.method])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method))
   if (!operation) {
     return
   }

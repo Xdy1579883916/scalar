@@ -1,4 +1,5 @@
 <script lang="ts">
+/* global PACKAGE_VERSION */
 // Injected by Vite at build time (see vite.config.ts and vite.standalone.config.ts).
 // Read via process.env so the constant is replaced inline without pulling package.json
 // into the TypeScript program — that would expand rootDir and emit declarations under dist/src/.
@@ -12,16 +13,18 @@ if (version && typeof window !== 'undefined') {
 <script setup lang="ts">
 import { provideUseId } from '@headlessui/vue'
 import { OpenApiClientButton } from '@scalar/api-client/blocks/operation-block'
+import type { ApiClientModal } from '@scalar/api-client/modal'
 import {
-  createApiClientModal,
-  type ApiClientModal,
-} from '@scalar/api-client/modal'
-import {
-  addScalarClassesToHeadless,
   ScalarColorModeToggleButton,
   ScalarColorModeToggleIcon,
+} from '@scalar/components/color-mode-toggle'
+import { addScalarClassesToHeadless } from '@scalar/components/helpers'
+import {
   ScalarSidebarFooter,
-} from '@scalar/components'
+  ScalarSidebarSection,
+} from '@scalar/components/sidebar'
+import { toJsonCompatible } from '@scalar/helpers/object/to-json-compatible'
+import { slugify } from '@scalar/helpers/string/slugify'
 import { isLocalUrl } from '@scalar/helpers/url/is-local-url'
 import { apiReferenceConfigurationSchema } from '@scalar/schemas/api-reference'
 import {
@@ -31,6 +34,7 @@ import {
 } from '@scalar/sidebar'
 import { getThemeStyles, hasObtrusiveScrollbars } from '@scalar/themes'
 import {
+  DEFAULT_MODELS_SECTION_LABEL,
   type AnyApiReferenceConfiguration,
   type ApiReferenceConfiguration,
   type ApiReferenceConfigurationRaw,
@@ -39,6 +43,7 @@ import { useClipboard } from '@scalar/use-hooks/useClipboard'
 import { useColorMode } from '@scalar/use-hooks/useColorMode'
 import { ScalarToasts } from '@scalar/use-toasts'
 import { coerce } from '@scalar/validation'
+import { getAsyncApiServers } from '@scalar/workspace-store/channel-example'
 import { createWorkspaceStore } from '@scalar/workspace-store/client'
 import { createWorkspaceEventBus } from '@scalar/workspace-store/events'
 import {
@@ -49,6 +54,10 @@ import type {
   TraversedEntry,
   TraversedTag,
 } from '@scalar/workspace-store/schemas/navigation'
+import {
+  isAsyncApiDocument,
+  isOpenApiDocument,
+} from '@scalar/workspace-store/schemas/type-guards'
 import { useScrollLock } from '@vueuse/core'
 import diff from 'microdiff'
 import {
@@ -65,6 +74,10 @@ import {
 } from 'vue'
 
 import {
+  AsyncApiSidebarFilters,
+  filterAsyncApiNavigation,
+} from '@/blocks/scalar-asyncapi-sidebar-filters-block'
+import {
   AgentScalarButton,
   AgentScalarDrawer,
   OpenMCPButton,
@@ -73,6 +86,10 @@ import ClassicHeader from '@/components/ClassicHeader.vue'
 import Content from '@/components/Content/Content.vue'
 import MobileHeader from '@/components/MobileHeader.vue'
 import { DeveloperTools } from '@/features/developer-tools'
+import {
+  provideLocalization,
+  resolveLocalization,
+} from '@/features/localization'
 import DocumentSelector from '@/features/multiple-documents/DocumentSelector.vue'
 import SearchButton from '@/features/Search/components/SearchButton.vue'
 import { getSystemModePreference } from '@/helpers/color-mode'
@@ -81,7 +98,13 @@ import {
   getIdFromUrl,
   makeUrlFromId,
   matchesBasePath,
+  redirectUrl,
+  type WebhookRedirectSource,
 } from '@/helpers/id-routing'
+import {
+  INTRODUCTION_ENTRY_ID_SUFFIX,
+  isIntroductionEntry,
+} from '@/helpers/is-introduction-entry'
 import {
   scrollToLazy as _scrollToLazy,
   addToPriorityQueue,
@@ -102,7 +125,7 @@ import { safeDeepClone } from '@/helpers/safe-deep-clone'
 import { AGENT_CONTEXT_SYMBOL, useAgent } from '@/hooks/use-agent'
 import { useIntersection } from '@/hooks/use-intersection'
 import { createPluginManager, PLUGIN_MANAGER_SYMBOL } from '@/plugins'
-import { persistencePlugin } from '@/plugins/persistance-plugin'
+import { persistencePlugin } from '@/plugins/persistence-plugin'
 
 const props = defineProps<{
   /**
@@ -130,7 +153,17 @@ const { copyToClipboard } = useClipboard()
  */
 const isDevelopment = import.meta.env.DEV
 
-const obtrusiveScrollbars = computed(hasObtrusiveScrollbars)
+/**
+ * Whether scrollbars take up screen real estate.
+ *
+ * This defaults to `false` so the first client render matches the server (where
+ * there is no DOM to measure). The real value is resolved in `onMounted` to
+ * avoid a hydration mismatch on the root class.
+ */
+const obtrusiveScrollbars = ref(false)
+onMounted(() => {
+  obtrusiveScrollbars.value = hasObtrusiveScrollbars()
+})
 
 const eventBus = createWorkspaceEventBus({ debug: isDevelopment })
 const isSidebarOpen = ref(false)
@@ -224,20 +257,88 @@ const documentOptionList = computed(() =>
   })),
 )
 
+/**
+ * AsyncAPI sidebar filters (protocol + server).
+ *
+ * These mirror the document picker: stacked dropdowns at the top of the sidebar
+ * that narrow the visible operations. State resets whenever the active document
+ * changes so a filter never leaks across documents.
+ */
+const selectedProtocol = ref<string>('')
+const selectedServer = ref<string>('')
+
+/** The active document, narrowed to AsyncAPI (or `null` for OpenAPI documents). */
+const activeAsyncApiDocument = computed(() => {
+  const document = workspaceStore.workspace.activeDocument
+  return isAsyncApiDocument(document) ? document : null
+})
+
+// Reset the filters when switching documents.
+watch(activeSlug, () => {
+  selectedProtocol.value = ''
+  selectedServer.value = ''
+})
+
 /** Configuration overrides to apply to the selected document (from the localhost toolbar) */
 const configurationOverrides = ref<
   Partial<Omit<ApiReferenceConfiguration, 'slug' | 'title' | ''>>
 >({})
 
+const withLocalizedConfigurationDefaults = (
+  config: ApiReferenceConfiguration,
+  activeConfig: Partial<ApiReferenceConfiguration> | undefined,
+): ApiReferenceConfiguration => {
+  const localization = resolveLocalization(config.localization)
+  const configuredModelsSectionLabel =
+    configurationOverrides.value.modelsSectionLabel ??
+    (activeConfig?.modelsSectionLabel !== DEFAULT_MODELS_SECTION_LABEL
+      ? activeConfig?.modelsSectionLabel
+      : undefined)
+
+  return {
+    ...config,
+    modelsSectionLabel:
+      configuredModelsSectionLabel ??
+      localization.translations.models.label ??
+      DEFAULT_MODELS_SECTION_LABEL,
+  }
+}
+
 /** Any dev toolbar modifications are merged with the active configuration */
-const mergedConfig = computed<ApiReferenceConfiguration>(() => ({
-  // Provides a default set of values when the lookup fails
-  ...coerce(apiReferenceConfigurationSchema, {}),
-  // The active configuration based on the slug
-  ...configList.value[activeSlug.value]?.config,
-  // Any overrides from the localhost toolbar
-  ...configurationOverrides.value,
+const mergedConfig = computed<ApiReferenceConfiguration>(() => {
+  const activeConfig = configList.value[activeSlug.value]?.config
+  const merged = {
+    // Provides a default set of values when the lookup fails
+    ...coerce(apiReferenceConfigurationSchema, {}),
+    // The active configuration based on the slug
+    ...activeConfig,
+    // Any overrides from the localhost toolbar
+    ...configurationOverrides.value,
+  }
+
+  return withLocalizedConfigurationDefaults(merged, activeConfig)
+})
+
+const apiReferenceLocalization = provideLocalization(
+  () => mergedConfig.value.localization,
+)
+
+const sidebarOptions = computed(() => ({
+  ...mergedConfig.value,
+  labels: {
+    closeGroup: apiReferenceLocalization.translate('navigation.closeGroup'),
+    httpMethod: apiReferenceLocalization.translate('common.httpMethod'),
+    openGroup: apiReferenceLocalization.translate('navigation.openGroup'),
+  },
 }))
+
+/**
+ * Locale string for the `lang` attribute. We normalize underscores to hyphens so values like
+ * `es_MX` become valid BCP-47 language tags (`es-MX`).
+ */
+const documentLang = computed(() =>
+  apiReferenceLocalization.locale.value.replace('_', '-'),
+)
 
 /** Convenience break out var to determine which routing mode we are using */
 const basePath = computed(() => mergedConfig.value.pathRouting?.basePath)
@@ -248,19 +349,53 @@ const themeStyle = computed(() =>
   }),
 )
 
-/** Plugin injection is not reactive. All plugins must be provided at first render */
-const pluginManager = createPluginManager({
-  plugins: Object.values(configList.value).flatMap(
-    (c) => c.config.plugins ?? [],
-  ),
-})
-provide(PLUGIN_MANAGER_SYMBOL, pluginManager)
+/**
+ * Custom CSS plus the theme styles, injected into a single `<style>` tag.
+ *
+ * This is rendered with `v-html` so the CSS is emitted verbatim. Interpolating
+ * it as text content makes Vue HTML-escape characters like `"` into `&quot;` on
+ * the server while the client keeps `"`, which both breaks the CSS and causes a
+ * hydration mismatch.
+ */
+const styleContent = computed(
+  () => `${mergedConfig.value.customCss ?? ''}\n${themeStyle.value}`,
+)
 
-pluginManager.notifyInit(mergedConfig.value)
-
-watch(mergedConfig, (config) => pluginManager.notifyConfigChange(config))
 // ---------------------------------------------------------------------------
 /** Navigation State Handling */
+
+// Collects every webhook entry in a navigation subtree, so old deep links can be
+// redirected from the legacy dot-dropped slug to the current one. Webhook ids are
+// only known once the document is loaded, so the redirect itself runs later, in
+// `changeSelectedDocument`.
+const collectWebhooks = (entries: TraversedEntry[]): WebhookRedirectSource[] =>
+  entries.flatMap((entry) => {
+    const nested =
+      'children' in entry && entry.children
+        ? collectWebhooks(entry.children)
+        : []
+    return entry.type === 'webhook'
+      ? [{ name: entry.name, method: entry.method, id: entry.id }, ...nested]
+      : nested
+  })
+
+// Rewrite outdated `model/` and `models/` schema URLs to the current models
+// section slug so bookmarks from before the slug changed keep resolving. Webhook
+// deep links are handled separately once the document (and its navigation) loads.
+if (typeof window !== 'undefined') {
+  const canonical = redirectUrl(
+    window.location.href,
+    slugify(
+      mergedConfig.value.modelsSectionLabel ?? DEFAULT_MODELS_SECTION_LABEL,
+    ),
+    activeSlug.value,
+    isMultiDocument.value,
+    mergedConfig.value.pathRouting?.basePath,
+  )
+  if (canonical) {
+    window.history.replaceState({}, '', canonical.toString())
+  }
+}
 
 // Front-end redirect
 if (mergedConfig.value.redirect && typeof window !== 'undefined') {
@@ -316,11 +451,47 @@ const clientStore = createWorkspaceStore({
   verbose: isDevelopment,
   plugins: [
     persistencePlugin({
-      prefix: () => activeSlug.value,
       persistAuth: () => mergedConfig.value.persistAuth ?? false,
     }),
   ],
 })
+
+/**
+ * Plugin injection is not reactive. All plugins must be provided at first render.
+ *
+ * Created after the client store so the auth accessor below can read from it — plugin `onInit`
+ * hooks may call `auth` synchronously during `notifyInit`. The reference-side Authentication panel
+ * (Content → Auth.vue) persists credentials into `clientStore.auth`, so plugins must read the same
+ * store to see what the user entered.
+ */
+const pluginManager = createPluginManager({
+  plugins: Object.values(configList.value).flatMap(
+    (c) => c.config.plugins ?? [],
+  ),
+  /**
+   * Read-only view of the global authentication state, so plugins can read stored secrets and
+   * the selected security schemes without being able to mutate them. Wraps the client store's
+   * auth methods (rather than passing the store directly) to keep the setters out of the plugin API.
+   *
+   * The getters return a deep copy (`export` already snapshots internally, the others go through
+   * `toJsonCompatible`) so plugins receive plain data rather than the store's live reactive proxies —
+   * mutating what they get back can never leak into the store.
+   */
+  auth: {
+    export: () => clientStore.auth.export(),
+    getAuthSecrets: (documentName, schemeName) =>
+      toJsonCompatible(
+        clientStore.auth.getAuthSecrets(documentName, schemeName),
+      ),
+    getAuthSelectedSchemas: (payload) =>
+      toJsonCompatible(clientStore.auth.getAuthSelectedSchemas(payload)),
+  },
+})
+provide(PLUGIN_MANAGER_SYMBOL, pluginManager)
+
+pluginManager.notifyInit(mergedConfig.value)
+
+watch(mergedConfig, (config) => pluginManager.notifyConfigChange(config))
 
 // TODO: persistence should be hoisted into standalone
 // Client side integrations will want to handle dark mode externally
@@ -334,19 +505,140 @@ const { toggleColorMode, isDarkMode } = useColorMode({
 })
 
 /**
+ * The active document passed to the search modal. Both OpenAPI and AsyncAPI
+ * documents are surfaced so the search index can pick up info.description
+ * headings from either spec; AsyncAPI-specific entries (channels, operations,
+ * messages) are not indexed yet.
+ */
+const activeSearchableDocument = computed(
+  () => workspaceStore.workspace.activeDocument,
+)
+
+/**
+ * Sidebar entries contributed by plugin views (content.start / content.end).
+ *
+ * Each entry reuses the same id as the rendered plugin component, so the existing
+ * navigation and scroll-spy logic can scroll to and highlight it. Plugins are static for
+ * the lifetime of the manager, so this only needs to be resolved once.
+ */
+const pluginSidebarEntries = computed(() =>
+  pluginManager
+    .getSidebarEntries(activeSlug.value)
+    .reduce<Record<'content.start' | 'content.end', TraversedEntry[]>>(
+      (grouped, entry) => {
+        grouped[entry.viewName].push({
+          id: entry.id,
+          title: entry.label,
+          type: 'text',
+        })
+        return grouped
+      },
+      { 'content.start': [], 'content.end': [] },
+    ),
+)
+
+/**
+ * Localize the synthetic labels we generate for the sidebar (introduction, webhooks, and the models
+ * section). Entries are only cloned when a label actually changes, so the common English-default case
+ * does not allocate a new navigation tree on every recompute.
+ */
+const localizeNavigationEntries = (
+  entries: TraversedEntry[],
+): TraversedEntry[] => {
+  const introductionTitle = apiReferenceLocalization.translate(
+    'navigation.introduction',
+  )
+  const webhooksTitle = apiReferenceLocalization.translate(
+    'navigation.webhooks',
+  )
+  const modelsSectionLabel =
+    mergedConfig.value.modelsSectionLabel ?? DEFAULT_MODELS_SECTION_LABEL
+
+  const localize = (list: TraversedEntry[]): TraversedEntry[] => {
+    let changed = false
+
+    const result = list.map((entry) => {
+      let localized = entry
+
+      if (isIntroductionEntry(entry) && entry.title !== introductionTitle) {
+        localized = { ...entry, title: introductionTitle } as TraversedEntry
+      } else if (
+        entry.type === 'tag' &&
+        entry.isWebhooks === true &&
+        (entry.title !== webhooksTitle || entry.name !== webhooksTitle)
+      ) {
+        localized = {
+          ...entry,
+          title: webhooksTitle,
+          name: webhooksTitle,
+        } as TraversedEntry
+      } else if (
+        entry.type === 'models' &&
+        (entry.title !== modelsSectionLabel ||
+          entry.name !== modelsSectionLabel)
+      ) {
+        localized = {
+          ...entry,
+          title: modelsSectionLabel,
+          name: modelsSectionLabel,
+        } as TraversedEntry
+      }
+
+      if ('children' in entry && entry.children) {
+        const localizedChildren = localize(entry.children)
+
+        if (localizedChildren !== entry.children) {
+          localized =
+            localized === entry ? ({ ...entry } as TraversedEntry) : localized
+          ;(localized as { children?: TraversedEntry[] }).children =
+            localizedChildren
+        }
+      }
+
+      if (localized !== entry) {
+        changed = true
+      }
+
+      return localized
+    })
+
+    // Preserve the original reference when nothing changed to avoid downstream re-renders.
+    return changed ? result : list
+  }
+
+  return localize(entries)
+}
+
+/**
  * Create top level sidebar entries for each document
  * This allows sharing a single sidebar state for across the workspace
  */
 const itemsFromWorkspace = computed<TraversedEntry[]>(() => {
   return Object.entries(workspaceStore.workspace.documents).map(
-    ([slug, document]) => ({
-      id: slug,
-      type: 'document',
-      description: document.info.description,
-      name: document.info.title ?? slug,
-      title: document.info.title ?? slug,
-      children: document?.['x-scalar-navigation']?.children ?? [],
-    }),
+    ([slug, document]) => {
+      // Both OpenAPI and AsyncAPI documents carry an `x-scalar-navigation` tree.
+      const children = document['x-scalar-navigation']?.children ?? []
+
+      // Plugin views render once for the active document, so only surface their sidebar
+      // entries there. `content.start` sits above the Introduction, `content.end` below.
+      const childrenWithPlugins =
+        slug === activeSlug.value
+          ? [
+              ...pluginSidebarEntries.value['content.start'],
+              ...localizeNavigationEntries(children),
+              ...pluginSidebarEntries.value['content.end'],
+            ]
+          : localizeNavigationEntries(children)
+
+      return {
+        id: slug,
+        type: 'document',
+        description: document.info.description,
+        name: document.info.title ?? slug,
+        title: document.info.title ?? slug,
+        children: childrenWithPlugins,
+      }
+    },
   )
 })
 
@@ -375,10 +667,19 @@ const sidebarItems = computed<TraversedEntry[]>(() => {
     return []
   }
 
-  const docItems =
+  const rawDocItems =
     sidebarState.items.value.find(
       (item): item is TraversedTag => item.id === activeSlug.value,
     )?.children ?? []
+
+  // Apply the AsyncAPI protocol/server filters to the sidebar tree. This is a no-op
+  // for OpenAPI documents and when no filter is selected.
+  const docItems = activeAsyncApiDocument.value
+    ? filterAsyncApiNavigation(rawDocItems, activeAsyncApiDocument.value, {
+        protocol: selectedProtocol.value,
+        server: selectedServer.value,
+      })
+    : rawDocItems
 
   // When the default open all tags configuration is enabled we open all the children of the document
   if (config.defaultOpenAllTags) {
@@ -404,9 +705,8 @@ const sidebarItems = computed<TraversedEntry[]>(() => {
 /** Find the sidebar entry that represents the introduction section */
 const infoSectionId = computed(
   () =>
-    sidebarItems.value.find(
-      (item) => item.type === 'text' && item.title === 'Introduction',
-    )?.id ?? `${activeSlug.value}/description/introduction`,
+    sidebarItems.value.find(isIntroductionEntry)?.id ??
+    `${activeSlug.value}${INTRODUCTION_ENTRY_ID_SUFFIX}`,
 )
 
 /** User for mobile navigation */
@@ -430,6 +730,31 @@ const scrollToLazyElement = (id: string) => {
   setBreadcrumb(id)
   sidebarState.setSelected(id)
   _scrollToLazy(id, sidebarState.setExpanded, sidebarState.getEntryById)
+}
+
+/**
+ * Updates the browser tab title via the user-provided `setPageTitle` callback.
+ *
+ * Called whenever the section in view changes — on sidebar clicks, on scroll, and
+ * when switching documents — so the tab title always reflects what the reader sees.
+ */
+const updatePageTitle = (id: string) => {
+  const setPageTitle = mergedConfig.value?.setPageTitle
+  const entry = sidebarState.getEntryById(id)
+
+  if (!setPageTitle || typeof document === 'undefined' || !entry?.title) {
+    return
+  }
+
+  const activeDocument = workspaceStore.workspace.activeDocument
+
+  document.title = setPageTitle({
+    title: entry.title,
+    document: {
+      title: activeDocument?.info?.title ?? activeSlug.value,
+      slug: activeSlug.value,
+    },
+  })
 }
 
 /** Maps some config values to the workspace store to keep it reactive */
@@ -524,6 +849,154 @@ const addDocument: typeof workspaceStore.addDocument = async (
 // ---------------------------------------------------------------------------
 // Document Management
 
+/** In-flight document loads, so a background preload and a user selection never load the same document twice */
+const documentLoadPromises = new Map<string, Promise<void>>()
+
+/**
+ * Load a document into the workspace store by slug, fetching URL sources or using inline content.
+ *
+ * This does not change the active document, so it is safe to call in the background to warm up
+ * documents the user has not selected yet. Repeated calls are deduplicated and it becomes a no-op
+ * once the document is loaded.
+ */
+const ensureDocumentLoaded = (slug: string): Promise<void> => {
+  // Already loaded, nothing to do
+  if (workspaceStore.workspace.documents[slug]) {
+    return Promise.resolve()
+  }
+
+  // A load is already in flight, reuse it
+  const pending = documentLoadPromises.get(slug)
+  if (pending) {
+    return pending
+  }
+
+  const normalized = configList.value[slug]
+
+  if (!normalized) {
+    return Promise.resolve()
+  }
+
+  const config = withLocalizedConfigurationDefaults(
+    {
+      ...normalized.config,
+      ...configurationOverrides.value,
+    },
+    normalized.config,
+  )
+
+  const promise = (async () => {
+    const result = await addDocument(
+      normalized.source.url
+        ? {
+            name: slug,
+            url: normalized.source.url,
+            fetch: config.customFetch,
+          }
+        : {
+            name: slug,
+            document: normalized.source.content ?? {},
+          },
+      config,
+    )
+
+    const document = clientStore.workspace.documents[slug]
+
+    // If the document does not have a selected server we set it to the first server
+    if (
+      result === true &&
+      isOpenApiDocument(document) &&
+      document['x-scalar-selected-server'] === undefined
+    ) {
+      // Set the active server if the document is loaded successfully. Resolve relative servers
+      // against this document's own base URL, not the active document's, so a background preload
+      // does not derive its server from whichever document happens to be active.
+      const servers = getServers(
+        normalized.config.servers ?? document.servers,
+        {
+          baseServerUrl: config.baseServerURL,
+          documentUrl: normalized.source.url,
+        },
+      )
+      if (servers.length > 0) {
+        clientStore.updateDocument(
+          slug,
+          'x-scalar-selected-server',
+          servers[0]!.url,
+        )
+      }
+    }
+  })().finally(() => {
+    documentLoadPromises.delete(slug)
+  })
+
+  documentLoadPromises.set(slug, promise)
+
+  return promise
+}
+
+/** Whether idle preloading has been stopped, for example when the component unmounts */
+let isPreloadStopped = false
+/** Cancels the currently scheduled idle preload callback, if one is pending */
+let cancelScheduledPreload: (() => void) | undefined
+
+/**
+ * Stop any in-progress idle preloading. Without this, an orphaned instance (an Astro view
+ * transition or a `createApiReference` remount) would keep fetching and parsing documents into
+ * an abandoned store after unmount.
+ */
+const stopPreloadingDocuments = () => {
+  isPreloadStopped = true
+  cancelScheduledPreload?.()
+  cancelScheduledPreload = undefined
+}
+
+/**
+ * Warm up the documents the user has not selected yet while the browser is idle, so switching
+ * between documents is instant. Runs on the client only and loads one document at a time to avoid
+ * a burst of fetches and parsing work competing with the active document.
+ */
+const preloadDocumentsWhenIdle = () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const pendingSlugs = Object.keys(configList.value).filter(
+    (slug) => !workspaceStore.workspace.documents[slug],
+  )
+
+  const scheduleIdle = (callback: () => void) => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const handle = window.requestIdleCallback(callback, { timeout: 1500 })
+      cancelScheduledPreload = () => window.cancelIdleCallback(handle)
+    } else {
+      const handle = window.setTimeout(callback, 200)
+      cancelScheduledPreload = () => window.clearTimeout(handle)
+    }
+  }
+
+  const loadNext = () => {
+    if (isPreloadStopped) {
+      return
+    }
+
+    const slug = pendingSlugs.shift()
+
+    if (!slug) {
+      return
+    }
+
+    // Load one document, then queue the next once the browser is idle again
+    void ensureDocumentLoaded(slug).finally(() => {
+      if (!isPreloadStopped) {
+        scheduleIdle(loadNext)
+      }
+    })
+  }
+
+  scheduleIdle(loadNext)
+}
+
 /**
  * Handle changing the active document
  *
@@ -542,10 +1015,13 @@ const changeSelectedDocument = async (
     return
   }
 
-  const config = {
-    ...normalized.config,
-    ...configurationOverrides.value,
-  }
+  const config = withLocalizedConfigurationDefaults(
+    {
+      ...normalized.config,
+      ...configurationOverrides.value,
+    },
+    normalized.config,
+  )
 
   // Store `onDocumentSelect` result to await its execution later, before calling `onLoaded`
   const onDocumentSelectPromise = config.onDocumentSelect?.()
@@ -560,53 +1036,38 @@ const changeSelectedDocument = async (
     path: '/',
   })
 
-  const isFirstLoad = !workspaceStore.workspace.documents[slug]
-
-  // If the document is not in the store, we asynchronously load it
-  if (isFirstLoad) {
-    const result = await addDocument(
-      normalized.source.url
-        ? {
-            name: slug,
-            url: normalized.source.url,
-            fetch: config.fetch,
-          }
-        : {
-            name: slug,
-            document: normalized.source.content ?? {},
-          },
-      config,
-    )
-
-    const document = clientStore.workspace.documents[slug]
-
-    // If the document does not have a selected server we set it to the first server
-    if (
-      result === true &&
-      document !== undefined &&
-      document['x-scalar-selected-server'] === undefined
-    ) {
-      // Set the active server if the document is loaded successfully
-      const servers = getServers(
-        normalized.config.servers ?? document.servers,
-        {
-          baseServerUrl: mergedConfig.value.baseServerURL,
-          documentUrl: normalized.source.url,
-        },
-      )
-      if (servers.length > 0) {
-        clientStore.updateDocument(
-          slug,
-          'x-scalar-selected-server',
-          servers[0]!.url,
-        )
-      }
-    }
-  }
+  // Load the document if it is not in the store yet (a background preload may already be loading it)
+  await ensureDocumentLoaded(slug)
 
   // Always set it to active; if the document is null we show a loading state
   workspaceStore.update('x-scalar-active-document', slug)
   clientStore.update('x-scalar-active-document', slug)
+
+  // Now that the navigation is available, canonicalize a legacy webhook deep link:
+  // old ids dropped the dot in the event name (`account-holdercreated`), so rewrite
+  // the URL and the scroll target to the current slug before we scroll to it.
+  if (elementId && typeof window !== 'undefined') {
+    const canonical = redirectUrl(
+      window.location.href,
+      slugify(config.modelsSectionLabel ?? DEFAULT_MODELS_SECTION_LABEL),
+      slug,
+      isMultiDocument.value,
+      config.pathRouting?.basePath,
+      collectWebhooks(
+        workspaceStore.workspace.activeDocument?.['x-scalar-navigation']
+          ?.children ?? [],
+      ),
+    )
+    if (canonical) {
+      window.history.replaceState({}, '', canonical.toString())
+      elementId =
+        getIdFromUrl(
+          canonical.href,
+          config.pathRouting?.basePath,
+          isMultiDocument.value ? undefined : slug,
+        ) || elementId
+    }
+  }
 
   // If the document has persistence enabled we load the auth schemes from storage
   if (config.persistAuth) {
@@ -630,6 +1091,9 @@ const changeSelectedDocument = async (
       sidebarState.setExpanded(firstTag.id, true)
     }
   }
+
+  // Reflect the freshly selected document in the browser tab title
+  updatePageTitle(elementId && elementId !== slug ? elementId : slug)
 }
 
 /**
@@ -647,6 +1111,24 @@ watch(
       updated: NormalizedConfiguration,
       previous: NormalizedConfiguration | undefined,
     ) => {
+      const config = withLocalizedConfigurationDefaults(
+        {
+          ...updated.config,
+          ...configurationOverrides.value,
+        },
+        updated.config,
+      )
+
+      /**
+       * A background preload may still be loading this document against the previous
+       * configuration. Wait for it to finish so the update below rebases onto the loaded
+       * document instead of being skipped, which would otherwise leave stale content in the store.
+       */
+      const pendingLoad = documentLoadPromises.get(updated.slug)
+      if (pendingLoad) {
+        await pendingLoad
+      }
+
       /** If we have not loaded the document previously we don't need to handle any updates to store */
       if (!workspaceStore.workspace.documents[updated.slug]) {
         return
@@ -657,9 +1139,9 @@ watch(
           {
             name: updated.slug,
             url: updated.source.url,
-            fetch: updated.config.fetch,
+            fetch: config.customFetch,
           },
-          updated.config,
+          config,
         )
 
         return
@@ -687,7 +1169,7 @@ watch(
             name: updated.slug,
             document: updated.source.content,
           },
-          updated.config,
+          config,
         )
       }
     }
@@ -728,6 +1210,9 @@ onBeforeMount(async () => {
       isMultiDocument.value ? undefined : activeSlug.value,
     ),
   )
+
+  // Warm up the remaining documents in the background so switching between them is instant
+  preloadDocumentsWhenIdle()
 })
 
 const documentUrl = computed(() => {
@@ -764,10 +1249,20 @@ provide(AGENT_CONTEXT_SYMBOL, agent)
 // --------------------------------------------------------------------------- */
 // Api Client Modal
 
-// Setup the ApiClient on mount
+// Setup the ApiClient on mount.
+// The modal is dynamic-imported so its dependency graph (CodeMirror, the request
+// editor, the response viewer, etc.) becomes a separate chunk that loads
+// asynchronously after the API reference paints.
 const modal = useTemplateRef<HTMLElement>('modal')
 const apiClient = ref<ApiClientModal | null>(null)
-onMounted(() => {
+onMounted(async () => {
+  if (!modal.value) {
+    return
+  }
+
+  const { createApiClientModal } = await import('@scalar/api-client/modal')
+
+  // Bail if the component unmounted while the chunk was loading.
   if (!modal.value) {
     return
   }
@@ -784,6 +1279,7 @@ onMounted(() => {
   })
 })
 onBeforeUnmount(() => {
+  stopPreloadingDocuments()
   pluginManager.notifyDestroy()
   apiClient.value?.app.unmount()
 })
@@ -795,6 +1291,23 @@ onBeforeUnmount(() => {
 eventBus.on('server:update:selected', ({ url }) =>
   mergedConfig.value.onServerChange?.(url),
 )
+
+/**
+ * AsyncAPI servers are keyed by name, so resolve the selected name to its
+ * constructed connection URL before firing onServerChange, keeping the callback
+ * payload consistent with OpenAPI (a URL string).
+ */
+eventBus.on('asyncapi-server:update:selected', ({ name }) => {
+  const document = clientStore.workspace.activeDocument
+  if (!isAsyncApiDocument(document)) {
+    return
+  }
+
+  const server = getAsyncApiServers(document, { webSocketOnly: false }).find(
+    (s) => s.name === name,
+  )
+  mergedConfig.value.onServerChange?.(server?.url ?? name)
+})
 
 /** Download the document from the store */
 eventBus.on('ui:download:document', ({ format }) => {
@@ -823,6 +1336,8 @@ eventBus.on('ui:download:document', ({ format }) => {
  */
 const handleSelectSidebarEntry = (id: string, caller?: 'sidebar') => {
   const item = sidebarState.getEntryById(id)
+
+  updatePageTitle(id)
 
   if (
     (item?.type === 'tag' ||
@@ -877,6 +1392,9 @@ eventBus.on('intersecting:nav-item', ({ id }) => {
 
   sidebarState.setSelected(id)
   setBreadcrumb(id)
+
+  // Keep the browser tab title in sync with the section scrolled into view
+  updatePageTitle(id)
 
   // Scroll the sidebar to keep the selected element near the top
   scrollSidebarToTop(id)
@@ -945,11 +1463,15 @@ const documentStartRef = useTemplateRef<HTMLElement>('documentStartRef')
  * observer are intersecting simultaneously, so the section observer does not re-fire on its own.
  * The `onExit` callback bridges that gap by finding whichever section is at the viewport center
  * and re-emitting the nav event for it.
+ *
+ * We emit the Introduction entry rather than the document slug so this sentinel and the Introduction
+ * section's own intersection observer resolve to the same entry. Otherwise the two race at the top of
+ * the document and the tab title flickers between the section title and the document title.
  */
 useIntersection(
   documentStartRef,
   () => {
-    eventBus.emit('intersecting:nav-item', { id: activeSlug.value })
+    eventBus.emit('intersecting:nav-item', { id: infoSectionId.value })
   },
   {
     onExit: () => {
@@ -1003,10 +1525,11 @@ const showMCPButton = computed(() => {
   <!-- SingleApiReference -->
   <div>
     <!-- Inject any custom CSS directly into a style tag -->
-    <component :is="'style'">
-      {{ mergedConfig.customCss }}
-      {{ themeStyle }}
-    </component>
+    <!-- eslint-disable vue/no-v-text-v-html-on-component -->
+    <component
+      :is="'style'"
+      v-html="styleContent" />
+    <!-- eslint-enable vue/no-v-text-v-html-on-component -->
     <div
       ref="documentEl"
       class="scalar-app scalar-api-reference references-layout"
@@ -1020,7 +1543,9 @@ const showMCPButton = computed(() => {
           'references-classic': mergedConfig.layout === 'classic',
         },
         $attrs.class,
-      ]">
+      ]"
+      :dir="apiReferenceLocalization.direction.value"
+      :lang="documentLang">
       <!-- Agent Scalar -->
       <AgentScalarDrawer
         v-if="agent.agentEnabled.value"
@@ -1040,24 +1565,29 @@ const showMCPButton = computed(() => {
           <SearchButton
             v-if="!mergedConfig.hideSearch"
             class="my-2"
-            :document="workspaceStore.workspace.activeDocument"
+            :document="activeSearchableDocument"
             :eventBus="eventBus"
             :hideModels="mergedConfig.hideModels"
+            :modelsSectionLabel="mergedConfig.modelsSectionLabel"
             :searchHotKey="mergedConfig.searchHotKey"
             :showSidebar="mergedConfig.showSidebar" />
         </template>
         <template #sidebar="{ sidebarClasses }">
           <ScalarSidebar
             v-if="mergedConfig.showSidebar && mergedConfig.layout === 'modern'"
-            :aria-label="`Sidebar for ${workspaceStore.workspace.activeDocument?.info?.title}`"
+            :aria-label="
+              apiReferenceLocalization.translate('navigation.sidebarFor', {
+                name:
+                  workspaceStore.workspace.activeDocument?.info?.title ?? '',
+              })
+            "
             class="t-doc__sidebar"
             :class="sidebarClasses"
             :isExpanded="sidebarState.isExpanded"
             :isSelected="sidebarState.isSelected"
             :items="sidebarItems"
             layout="reference"
-            :options="mergedConfig"
-            role="navigation"
+            :options="sidebarOptions"
             @selectItem="(id) => handleSelectSidebarEntry(id, 'sidebar')"
             @toggleGroup="
               (id: string) =>
@@ -1076,17 +1606,31 @@ const showMCPButton = computed(() => {
                 v-if="!mergedConfig.hideSearch"
                 class="flex gap-1.5 px-3 pt-3">
                 <SearchButton
-                  :document="workspaceStore.workspace.activeDocument"
+                  :document="activeSearchableDocument"
                   :eventBus="eventBus"
                   :hideModels="mergedConfig.hideModels"
+                  :modelsSectionLabel="mergedConfig.modelsSectionLabel"
                   :searchHotKey="mergedConfig.searchHotKey" />
 
                 <AgentScalarButton v-if="agent.agentEnabled.value" />
               </div>
+
               <!-- Sidebar Start -->
               <slot
                 name="sidebar-start"
                 v-bind="slotProps" />
+            </template>
+            <template #before>
+              <!-- AsyncAPI protocol + server filters (only render with >1 choice) -->
+              <AsyncApiSidebarFilters
+                v-model:protocol="selectedProtocol"
+                v-model:server="selectedServer"
+                :document="activeAsyncApiDocument" />
+              <ScalarSidebarSection
+                v-if="activeAsyncApiDocument"
+                class="asyncapi-sidebar-document-section">
+                Document
+              </ScalarSidebarSection>
             </template>
             <template #footer>
               <slot
@@ -1108,6 +1652,18 @@ const showMCPButton = computed(() => {
                     :url="documentUrl"
                     :workspace="workspaceStore" />
                   <div />
+                  <template #description>
+                    <a
+                      class="no-underline hover:underline"
+                      href="https://www.scalar.com"
+                      target="_blank">
+                      {{
+                        apiReferenceLocalization.translate(
+                          'footer.poweredByScalar',
+                        )
+                      }}
+                    </a>
+                  </template>
                   <!-- Override the dark mode toggle slot to hide it -->
                   <template #toggle>
                     <ScalarColorModeToggleButton
@@ -1128,13 +1684,18 @@ const showMCPButton = computed(() => {
 
       <!-- Primary Content -->
       <main
-        :aria-label="`Open API Documentation for ${workspaceStore.workspace.activeDocument?.info?.title}`"
+        :aria-label="
+          apiReferenceLocalization.translate('navigation.mainContent', {
+            name: workspaceStore.workspace.activeDocument?.info?.title ?? '',
+          })
+        "
         class="references-rendered"
         :inert="agent.showAgent.value">
         <Content
           :authStore="clientStore.auth"
           :clientDocument="clientStore.workspace.activeDocument"
           :document="workspaceStore.workspace.activeDocument"
+          :documentSlug="activeSlug"
           :environment
           :eventBus
           :expandedItems="sidebarState.expandedItems.value"
@@ -1147,6 +1708,9 @@ const showMCPButton = computed(() => {
           :options="mergedConfig"
           :xScalarDefaultClient="
             clientStore.workspace['x-scalar-default-client']
+          "
+          :xScalarDefaultExample="
+            clientStore.workspace['x-scalar-default-example']
           ">
           <template #start>
             <!-- Placeholder intersection observer that emits an empty string to clear the hash when scrolled to the top -->
@@ -1171,9 +1735,10 @@ const showMCPButton = computed(() => {
               <SearchButton
                 v-if="!mergedConfig.hideSearch"
                 class="t-doc__sidebar max-w-64"
-                :document="workspaceStore.workspace.activeDocument"
+                :document="activeSearchableDocument"
                 :eventBus="eventBus"
                 :hideModels="mergedConfig.hideModels"
+                :modelsSectionLabel="mergedConfig.modelsSectionLabel"
                 :searchHotKey="mergedConfig.searchHotKey" />
               <template #dark-mode-toggle>
                 <ScalarColorModeToggleIcon
@@ -1233,6 +1798,10 @@ const showMCPButton = computed(() => {
 /** Used to check if css is loaded */
 :root {
   --scalar-loaded-api-reference: true;
+}
+
+.asyncapi-sidebar-document-section > .group\/spacer-after {
+  height: 0;
 }
 </style>
 <style scoped>
@@ -1332,7 +1901,15 @@ const showMCPButton = computed(() => {
 /* ----------------------------------------------------- */
 /* Responsive / Mobile Layout */
 
-@media (max-width: 1000px) {
+/*
+ * Stop just below the `lg` breakpoint (1000px). The sidebar visibility is driven
+ * by Tailwind's `lg:` variant, which is `min-width: 1000px` and therefore treats
+ * exactly 1000px as desktop. A `max-width: 1000px` query would make the grid
+ * switch to the mobile (stacked) layout at the very same width, so the desktop
+ * sidebar would render on top of the content. `width < 1000px` is the exact
+ * complement of `lg:` (`width >= 1000px`), keeping the two in sync.
+ */
+@media (width < 1000px) {
   /* Keep toolbar hidden on mobile without forcing desktop display mode. */
   .references-developer-tools {
     display: none;
@@ -1372,7 +1949,8 @@ const showMCPButton = computed(() => {
 * TODO: @brynn move this to the sidebar block OR the ApiReferenceStandalone component
 * when the new elements are available
 */
-@media (max-width: 1000px) {
+/* Match the layout breakpoint above so the mobile header height is only applied below `lg`. */
+@media (width < 1000px) {
   .scalar-api-references-standalone-mobile:not(.references-classic) {
     --scalar-header-height: 50px;
   }

@@ -1,11 +1,11 @@
 import type { HttpMethod } from '@scalar/helpers/http/http-methods'
-import { isHttpMethod } from '@scalar/helpers/http/is-http-method'
-import { objectKeys } from '@scalar/helpers/object/object-keys'
 import { escapeJsonPointer } from '@scalar/json-magic/helpers/escape-json-pointer'
 
-import { getResolvedRef } from '@/helpers/get-resolved-ref'
+import { forEachPathItemOperation } from '@/helpers/for-each-path-item-operation'
+import { getResolvedRef, mergeSiblingReferences } from '@/helpers/get-resolved-ref'
+import { isHidden } from '@/helpers/is-hidden'
 import { traverseOperationExamples } from '@/navigation/helpers/traverse-examples'
-import type { TagsMap, TraverseSpecOptions } from '@/navigation/types'
+import type { OperationTitleSource, TagsMap, TraverseSpecOptions } from '@/navigation/types'
 import { XScalarStabilityValues } from '@/schemas/extensions/operation'
 import type { ParentTag, TraversedExample, TraversedOperation } from '@/schemas/navigation'
 import type { OpenApiDocument, OperationObject } from '@/schemas/v3.1/strict/openapi-document'
@@ -36,6 +36,7 @@ const createOperationEntry = ({
   generateId,
   parentId,
   parentTag,
+  operationTitleSource,
 }: {
   ref: string
   operation: OperationObject
@@ -44,6 +45,7 @@ const createOperationEntry = ({
   parentTag?: ParentTag
   generateId: TraverseSpecOptions['generateId']
   parentId: string
+  operationTitleSource?: OperationTitleSource
 }): TraversedOperation => {
   const id = generateId({
     type: 'operation',
@@ -53,7 +55,7 @@ const createOperationEntry = ({
     path: path,
     parentId: parentId,
   })
-  const title = operation.summary?.trim() ? operation.summary : path
+  const title = operationTitleSource === 'path' ? path : operation.summary?.trim() ? operation.summary : path
 
   const isDeprecated = isDeprecatedOperation(operation)
 
@@ -104,6 +106,7 @@ export const traversePaths = ({
   tagsMap,
   generateId,
   documentId,
+  operationTitleSource,
 }: {
   document: OpenApiDocument
   /** Map of tags and their entries */
@@ -112,22 +115,21 @@ export const traversePaths = ({
   generateId: TraverseSpecOptions['generateId']
   /** Document ID */
   documentId: string
+  /** Whether to use the operation summary or the operation path for sidebar titles */
+  operationTitleSource?: OperationTitleSource
 }): { untaggedOperations: TraversedOperation[] } => {
   const untaggedOperations: TraversedOperation[] = []
 
   // Traverse paths
-  Object.entries(document.paths ?? {}).forEach(([path, pathItemObject]) => {
-    const pathKeys = objectKeys(pathItemObject ?? {}).filter((key) => isHttpMethod(key))
-
-    pathKeys.forEach((method) => {
-      const _operation = pathItemObject?.[method]
-      const operation = getResolvedRef(_operation)
+  Object.entries(document.paths ?? {}).forEach(([path, pathItemRef]) => {
+    forEachPathItemOperation(pathItemRef, (method, operationRef) => {
+      const operation = getResolvedRef(operationRef, mergeSiblingReferences)
       if (!operation) {
         return
       }
 
       // Skip if the operation is internal or scalar-ignore
-      if (operation['x-internal'] || operation['x-scalar-ignore'] || !isHttpMethod(method)) {
+      if (isHidden(operation)) {
         return
       }
 
@@ -151,6 +153,7 @@ export const traversePaths = ({
               parentTag: { tag, id: tagId },
               generateId,
               parentId: tagId,
+              operationTitleSource,
             }),
           )
         })
@@ -164,6 +167,7 @@ export const traversePaths = ({
             path,
             generateId,
             parentId: documentId,
+            operationTitleSource,
           }),
         )
       }

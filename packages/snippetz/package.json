@@ -9,7 +9,7 @@
     "url": "git+https://github.com/scalar/scalar.git",
     "directory": "packages/snippetz"
   },
-  "version": "0.9.6",
+  "version": "0.9.24",
   "engines": {
     "node": ">=22"
   },
@@ -20,7 +20,7 @@
     "generate:markdown-docs": "tsx scripts/generate-markdown-docs.ts",
     "postbuild": "pnpm generate:dotnet-enums && pnpm generate:java-enums && pnpm generate:markdown-docs",
     "test": "vitest --run",
-    "types:check": "tsc --noEmit"
+    "types:check": "tsgo --noEmit"
   },
   "type": "module",
   "module": "./dist/index.js",
@@ -247,6 +247,7 @@
     "CHANGELOG"
   ],
   "dependencies": {
+    "@scalar/helpers": "workspace:*",
     "@scalar/types": "workspace:*",
     "js-base64": "catalog:*",
     "stringify-object": "^6.0.0"

@@ -39,8 +39,8 @@ afterEach(() => {
 
 const consoleWarnSpy = vi.spyOn(console, 'warn')
 
-// Since we use zod now we have a base config
-const baseConfig = coerce(apiReferenceConfigurationSchema, {
+// Base config matches getConfigurationFromDataAttributes output (withSource schema + defaults).
+const baseConfig = apiReferenceConfigurationWithSourceSchema({
   _integration: 'html',
 })
 
@@ -166,6 +166,79 @@ describe('createApiReference', () => {
     )
   })
 
+  it('removes the deprecated document listeners on destroy', () => {
+    const element = document.querySelector('#mount-point')
+    const config = { _integration: 'html' }
+
+    const apiReference = createApiReference(element!, coerce(apiReferenceConfigurationSchema, config))
+
+    consoleWarnSpy.mockClear()
+    apiReference.destroy()
+
+    document.dispatchEvent(new Event('scalar:reload-references'))
+    document.dispatchEvent(new Event('scalar:destroy-references'))
+    document.dispatchEvent(new CustomEvent('scalar:update-references-config', { detail: {} }))
+
+    // Listeners are scoped to the instance's `AbortController`, so dispatching
+    // these events after `destroy()` must not run their deprecation warnings —
+    // otherwise each remount during Astro view transitions would leak three
+    // permanent listeners on `document`.
+    expect(consoleWarnSpy).not.toHaveBeenCalled()
+  })
+
+  // The standalone build injects all of its CSS into one <style> tag in <head>.
+  // Under SPA-style navigation (Turbo Drive, htmx) the host swaps the DOM without
+  // reloading the window, so these document-level styles would otherwise linger
+  // and bleed into the host app's next page. `destroy()` detaches them and a fresh
+  // mount re-attaches them. We simulate the injected tag since the bundle's
+  // runtime injection does not run in the test environment.
+  const injectStandaloneStyle = () => {
+    const style = document.createElement('style')
+    style.id = 'scalar-style'
+    style.textContent = ':root { --scalar-loaded-api-reference: true; }'
+    document.head.appendChild(style)
+
+    return style
+  }
+
+  it('detaches the injected standalone styles on destroy', () => {
+    injectStandaloneStyle()
+    const config = { _integration: 'html' }
+    const apiReference = createApiReference('#mount-point', coerce(apiReferenceConfigurationSchema, config))
+
+    expect(document.getElementById('scalar-style')).not.toBeNull()
+
+    apiReference.destroy()
+    expect(document.getElementById('scalar-style')).toBeNull()
+  })
+
+  it('re-attaches the injected styles when a new instance mounts', () => {
+    injectStandaloneStyle()
+    const config = { _integration: 'html' }
+
+    createApiReference('#mount-point', coerce(apiReferenceConfigurationSchema, config)).destroy()
+    expect(document.getElementById('scalar-style')).toBeNull()
+
+    createApiReference('#mount-point', coerce(apiReferenceConfigurationSchema, config))
+    expect(document.getElementById('scalar-style')).not.toBeNull()
+  })
+
+  it('keeps the styles until the last instance is destroyed', () => {
+    injectStandaloneStyle()
+    const second = document.createElement('div')
+    document.body.appendChild(second)
+
+    const config = { _integration: 'html' }
+    const first = createApiReference('#mount-point', coerce(apiReferenceConfigurationSchema, config))
+    const last = createApiReference(second, coerce(apiReferenceConfigurationSchema, config))
+
+    first.destroy()
+    expect(document.getElementById('scalar-style')).not.toBeNull()
+
+    last.destroy()
+    expect(document.getElementById('scalar-style')).toBeNull()
+  })
+
   it('allows mounting after creation', async () => {
     const config = { _integration: 'html' }
     const app = createApiReference(coerce(apiReferenceConfigurationSchema, config))
@@ -253,6 +326,49 @@ describe('createApiReference', () => {
     // Assert the configuration was updated
     await flushPromises()
   })
+
+  it('loads plugins from pluginUrls before mounting', async () => {
+    const element = document.querySelector('#mount-point')
+
+    // An ESM module that records when the plugin factory is invoked by the plugin manager
+    const pluginUrl =
+      'data:text/javascript,export default () => { globalThis.__scalarUrlPluginInvoked = true; return { name: "url-plugin", extensions: [] } }'
+
+    const config = {
+      ...coerce(apiReferenceConfigurationSchema, { _integration: 'html' }),
+      content: JSON.stringify({
+        openapi: '3.1.0',
+        info: { title: 'Plugin Test API', version: '1.0.0' },
+        paths: {},
+      }),
+      pluginUrls: [pluginUrl],
+    }
+    createApiReference(element!, config)
+
+    // Mounting is deferred until the plugin module is imported
+    expect(element?.innerHTML).not.toContain('Powered by Scalar')
+
+    await vi.waitFor(() => expect(element?.innerHTML).toContain('Powered by Scalar'))
+
+    // The loaded plugin was registered with the plugin manager
+    expect((globalThis as Record<string, unknown>).__scalarUrlPluginInvoked).toBe(true)
+  })
+
+  it('does not mount when the instance is destroyed while plugins are loading', async () => {
+    const element = document.querySelector('#mount-point')
+
+    const config = {
+      ...coerce(apiReferenceConfigurationSchema, { _integration: 'html' }),
+      pluginUrls: ['data:text/javascript,export default () => ({ name: "url-plugin", extensions: [] })'],
+    }
+    const instance = createApiReference(element!, config)
+    instance.destroy()
+
+    await flushPromises()
+    await sleep(100)
+
+    expect(element?.innerHTML).not.toContain('Powered by Scalar')
+  })
 })
 
 describe('findDataAttributes (legacy)', () => {
@@ -290,7 +406,6 @@ describe('getConfigurationFromDataAttributes', () => {
     expect(getConfigurationFromDataAttributes(document)).toEqual({
       ...baseConfig,
       default: false,
-      proxyUrl: undefined,
       url: '/openapi.json',
     })
   })
@@ -306,7 +421,6 @@ describe('getConfigurationFromDataAttributes', () => {
 
     expect(getConfigurationFromDataAttributes(document)).toEqual({
       ...baseConfig,
-      proxyUrl: undefined,
       default: false,
       content: '{"openapi":"3.1.0"}',
     })
@@ -342,7 +456,6 @@ describe('getConfigurationFromDataAttributes', () => {
       ...baseConfig,
       darkMode: true,
       default: false,
-      proxyUrl: undefined,
       url: '/custom.json',
     })
   })
@@ -359,7 +472,6 @@ describe('getConfigurationFromDataAttributes', () => {
     expect(getConfigurationFromDataAttributes(document)).toEqual({
       ...baseConfig,
       default: false,
-      proxyUrl: undefined,
       content: '{"openapi":"3.1.0"}',
     })
 
@@ -377,7 +489,6 @@ describe('getConfigurationFromDataAttributes', () => {
 
     expect(getConfigurationFromDataAttributes(doc)).toEqual({
       ...baseConfig,
-      proxyUrl: undefined,
       default: false,
       url: '/deprecated.json',
     })
@@ -409,7 +520,6 @@ describe('getConfigurationFromDataAttributes', () => {
 
     expect(getConfigurationFromDataAttributes(doc)).toEqual({
       ...baseConfig,
-      proxyUrl: undefined,
       default: false,
       url: '/priority.json',
     })

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import {
   ScalarButton,
-  ScalarComboboxMultiselect,
-  ScalarIconButton,
-  ScalarListboxCheckbox,
-  useModal,
-  type Icon,
   type ScalarButton as ScalarButtonType,
-} from '@scalar/components'
+} from '@scalar/components/button'
+import { ScalarComboboxMultiselect } from '@scalar/components/combobox'
+import type { Icon } from '@scalar/components/icon'
+import { ScalarIconButton } from '@scalar/components/icon-button'
+import { ScalarListboxCheckbox } from '@scalar/components/listbox'
+import { useModal } from '@scalar/components/modal'
 import { ScalarIconCaretDown, ScalarIconTrash } from '@scalar/icons'
 import type { SelectedSecurity } from '@scalar/workspace-store/entities/auth'
 import type {
@@ -44,6 +44,7 @@ const {
   environment,
   eventBus,
   createAnySecurityScheme = false,
+  canDeleteSchemes = true,
   defaultOpen = true,
   isStatic = false,
   meta,
@@ -54,11 +55,17 @@ const {
   server,
   title,
   options,
+  documentType,
 } = defineProps<{
   environment: XScalarEnvironment
   eventBus: WorkspaceEventBus
   /** Allows adding authentication which is not in the document */
   createAnySecurityScheme?: boolean
+  /**
+   * Whether schemes can be deleted from the selector. Enabled for the editable client, disabled in
+   * the read-only reference where the schemes come from the document and cannot be removed.
+   */
+  canDeleteSchemes?: boolean
   /** Whether the authentication disclosure should start expanded */
   defaultOpen?: boolean
   /** Creates a static disclosure that cannot be collapsed */
@@ -72,6 +79,8 @@ const {
   title: string
   /**  Any config options required for the OAuth2 flow */
   options?: OAuth2Options
+  /** Type of the document the schemes belong to, used to label the missing-type warning */
+  documentType?: 'openapi' | 'asyncapi'
 }>()
 
 const titleId = useId()
@@ -284,7 +293,7 @@ defineExpose({
             {{ option.label }}
           </div>
           <ScalarIconButton
-            v-if="option.isDeletable"
+            v-if="option.isDeletable && canDeleteSchemes"
             class="-m-0.5 shrink-0 p-0.5 opacity-0 group-hover/item:opacity-100"
             :icon="ScalarIconTrash"
             :label="`Delete ${option.label}`"
@@ -297,6 +306,7 @@ defineExpose({
     <!-- Auth Table -->
     <RequestAuthDataTable
       :activeAuthIndex="selectedSecurity?.selectedIndex ?? 0"
+      :documentType
       :environment
       :eventBus
       :isStatic

@@ -1,6 +1,8 @@
+import { getOpenApiDocument } from '@test/helpers'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createWorkspaceStore } from '@/client'
+import { getPathItemOperation } from '@/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@/helpers/get-resolved-ref'
 import type { OpenApiDocument } from '@/schemas/v3.1/strict/openapi-document'
 
@@ -27,7 +29,7 @@ describe('createTag', () => {
 
     createTag(store, { documentName: 'test-doc', name: 'new-tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toHaveLength(2)
     expect(document?.tags?.[0]?.name).toBe('existing-tag')
     expect(document?.tags?.[1]?.name).toBe('new-tag')
@@ -42,7 +44,7 @@ describe('createTag', () => {
 
     createTag(store, { documentName: 'test-doc', name: 'first-tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toHaveLength(1)
     expect(document?.tags?.[0]?.name).toBe('first-tag')
   })
@@ -81,7 +83,7 @@ describe('createTag', () => {
     createTag(store, { documentName: 'test-doc', name: 'tag-2' })
     createTag(store, { documentName: 'test-doc', name: 'tag-3' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toHaveLength(3)
     expect(document?.tags?.map((t) => t.name)).toEqual(['tag-1', 'tag-2', 'tag-3'])
   })
@@ -99,7 +101,7 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'tag-2' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toHaveLength(2)
     expect(document?.tags?.map((t) => t.name)).toEqual(['tag-1', 'tag-3'])
   })
@@ -127,10 +129,10 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'users' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((t) => t.name)).toEqual(['admin'])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual(['admin'])
-    expect(getResolvedRef(document?.paths?.['/users']?.post)?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual(['admin'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))?.tags).toEqual([])
   })
 
   it('removes tag from webhooks', async () => {
@@ -152,9 +154,9 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'webhook-tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((t) => t.name)).toEqual(['other-tag'])
-    expect(getResolvedRef(document?.webhooks?.newUser?.post)?.tags).toEqual(['other-tag'])
+    expect(getResolvedRef(getPathItemOperation(document?.webhooks?.newUser, 'post'))?.tags).toEqual(['other-tag'])
   })
 
   it('no-ops when document does not exist', () => {
@@ -188,9 +190,9 @@ describe('deleteTag', () => {
 
     expect(() => deleteTag(store, { documentName: 'test-doc', name: 'tag' })).not.toThrow()
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toEqual([])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual([])
   })
 
   it('handles operations without tags property', async () => {
@@ -212,7 +214,7 @@ describe('deleteTag', () => {
 
     expect(() => deleteTag(store, { documentName: 'test-doc', name: 'tag' })).not.toThrow()
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toEqual([])
   })
 
@@ -227,7 +229,7 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toEqual([])
   })
 
@@ -249,9 +251,9 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toEqual([])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual([])
   })
 
   it('handles document without tags array', async () => {
@@ -271,9 +273,9 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'tag' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags).toBeUndefined()
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual([])
   })
 
   it('removes tag from multiple paths and methods', async () => {
@@ -298,13 +300,13 @@ describe('deleteTag', () => {
 
     deleteTag(store, { documentName: 'test-doc', name: 'common' })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((t) => t.name)).toEqual(['specific'])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual([])
-    expect(getResolvedRef(document?.paths?.['/users']?.post)?.tags).toEqual(['specific'])
-    expect(getResolvedRef(document?.paths?.['/users']?.put)?.tags).toEqual(['specific'])
-    expect(getResolvedRef(document?.paths?.['/products']?.get)?.tags).toEqual([])
-    expect(getResolvedRef(document?.paths?.['/products']?.delete)?.tags).toEqual(['specific'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))?.tags).toEqual(['specific'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'put'))?.tags).toEqual(['specific'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/products'], 'get'))?.tags).toEqual([])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/products'], 'delete'))?.tags).toEqual(['specific'])
   })
 
   it('handles deleting a tag that does not exist', async () => {
@@ -324,9 +326,9 @@ describe('deleteTag', () => {
     deleteTag(store, { documentName: 'test-doc', name: 'non-existent-tag' })
 
     // Tags array and operation tags should remain unchanged
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((t) => t.name)).toEqual(['existing-tag'])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual(['existing-tag'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual(['existing-tag'])
   })
 })
 
@@ -362,9 +364,9 @@ describe('editTag', () => {
       newName: 'renamed-tag',
     })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((tag) => tag.name)).toEqual(['existing-tag'])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual(['existing-tag'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual(['existing-tag'])
   })
 
   it('updates the tag name in document tags and all associated operations', async () => {
@@ -407,12 +409,15 @@ describe('editTag', () => {
       newName: 'customers',
     })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((tag) => tag.name)).toEqual(['customers', 'admin'])
-    expect(getResolvedRef(document?.paths?.['/users']?.get)?.tags).toEqual(['customers', 'admin'])
-    expect(getResolvedRef(document?.paths?.['/users']?.post)?.tags).toEqual(['customers'])
-    expect(getResolvedRef(document?.paths?.['/admin']?.get)?.tags).toEqual(['admin'])
-    expect(getResolvedRef(document?.webhooks?.userUpdated?.post)?.tags).toEqual(['customers'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))?.tags).toEqual([
+      'customers',
+      'admin',
+    ])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))?.tags).toEqual(['customers'])
+    expect(getResolvedRef(getPathItemOperation(document?.paths?.['/admin'], 'get'))?.tags).toEqual(['admin'])
+    expect(getResolvedRef(getPathItemOperation(document?.webhooks?.userUpdated, 'post'))?.tags).toEqual(['customers'])
   })
 
   it('produces correct navigation after editTag and a subsequent sidebar rebuild', async () => {
@@ -446,7 +451,7 @@ describe('editTag', () => {
     // Simulate the external rebuild triggered by onAfterExecute
     store.buildSidebar('test-doc')
 
-    const navigation = store.workspace.documents['test-doc']?.['x-scalar-navigation']
+    const navigation = getOpenApiDocument(store, 'test-doc')?.['x-scalar-navigation']
     const tagEntry = navigation?.children?.find((c: { type: string; name?: string }) => c.type === 'tag') as
       | { name?: string }
       | undefined
@@ -498,11 +503,14 @@ describe('editTag', () => {
       newName: 'alerts',
     })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((tag) => tag.name)).toEqual(['alerts', 'billing'])
-    expect(getResolvedRef(document?.webhooks?.newUser?.post)?.tags).toEqual(['alerts'])
-    expect(getResolvedRef(document?.webhooks?.paymentReceived?.post)?.tags).toEqual(['alerts', 'billing'])
-    expect(getResolvedRef(document?.webhooks?.invoiceCreated?.put)?.tags).toEqual(['billing'])
+    expect(getResolvedRef(getPathItemOperation(document?.webhooks?.newUser, 'post'))?.tags).toEqual(['alerts'])
+    expect(getResolvedRef(getPathItemOperation(document?.webhooks?.paymentReceived, 'post'))?.tags).toEqual([
+      'alerts',
+      'billing',
+    ])
+    expect(getResolvedRef(getPathItemOperation(document?.webhooks?.invoiceCreated, 'put'))?.tags).toEqual(['billing'])
   })
 
   it('updates child operation IDs in the tag x-scalar-order when renaming', async () => {
@@ -523,7 +531,7 @@ describe('editTag', () => {
     // Simulate a user-defined custom ordering: POST before GET (reverse of default).
     // The IDs follow the pattern generated by getNavigationOptions for document "test-doc"
     // and tag "users": "test-doc/tag/users/METHOD/path".
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     const usersTag = document?.tags?.find((t) => t.name === 'users')
     const oldPostId = 'test-doc/tag/users/POST/users'
     const oldGetId = 'test-doc/tag/users/GET/users'
@@ -539,7 +547,7 @@ describe('editTag', () => {
     })
 
     // The tag object itself should now be renamed
-    const renamedTag = store.workspace.documents['test-doc']?.tags?.find((t) => t.name === 'customers')
+    const renamedTag = getOpenApiDocument(store, 'test-doc')?.tags?.find((t) => t.name === 'customers')
     expect(renamedTag).toBeDefined()
 
     // x-scalar-order must have the SAME relative ordering, but with new IDs.
@@ -579,7 +587,7 @@ describe('editTag', () => {
       newName: 'customers',
     })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.tags?.map((tag) => tag.name)).toEqual(['customers', 'admin'])
     expect(document?.['x-tagGroups']?.[0]?.tags).toEqual(['customers', 'admin'])
     expect(document?.['x-tagGroups']?.[1]?.tags).toEqual(['admin'])

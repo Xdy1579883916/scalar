@@ -14,14 +14,13 @@ export default {}
 </script>
 
 <script setup lang="ts">
+import { ScalarButton } from '@scalar/components/button'
 import {
-  ScalarButton,
   ScalarListbox,
-  ScalarModal,
-  useLoadingState,
-  type ModalState,
   type ScalarListboxOption,
-} from '@scalar/components'
+} from '@scalar/components/listbox'
+import { useLoadingState } from '@scalar/components/loading'
+import { ScalarModal, type ModalState } from '@scalar/components/modal'
 import { slugify } from '@scalar/helpers/string/slugify'
 import { ScalarIconBuildings, ScalarIconCaretDown } from '@scalar/icons'
 import { computed, ref, watch } from 'vue'
@@ -212,10 +211,11 @@ const handleSubmit = (): void => {
           </div>
         </template>
         <template v-else-if="hasMultipleNamespaces">
+          <!-- Teleport uses z-context; modal overlay is z-overlay, so options would sit behind it. -->
           <ScalarListbox
             v-model="selectedNamespace"
             :options="namespaceOptions"
-            teleport>
+            resize>
             <ScalarButton
               class="border-border text-c-1 hover:bg-b-2 flex h-8 w-full items-center justify-between gap-2 rounded border px-3 font-normal"
               fullWidth

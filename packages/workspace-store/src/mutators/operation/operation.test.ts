@@ -1,8 +1,10 @@
+import { getOpenApiDocument } from '@test/helpers'
 import { assert, describe, expect, it } from 'vitest'
 
 import { createWorkspaceStore } from '@/client'
+import { getPathItemOperation, getResolvedPathItem } from '@/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@/helpers/get-resolved-ref'
-import type { WorkspaceDocument } from '@/schemas'
+import type { OpenApiDocument } from '@/schemas/v3.1/strict/openapi-document'
 
 import {
   createOperation,
@@ -14,7 +16,7 @@ import {
   updateOperationPathMethod,
 } from './operation'
 
-const createDocument = (initial?: Partial<WorkspaceDocument>): WorkspaceDocument => {
+const createDocument = (initial?: Partial<OpenApiDocument>): OpenApiDocument => {
   return {
     openapi: '3.1.0',
     info: { title: 'Test', version: '1.0.0' },
@@ -47,7 +49,7 @@ describe('updateOperationPathMethod (method only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document['x-scalar-order']).toStrictEqual([
       'test/description/introduction',
       'test/GET/users',
@@ -120,7 +122,7 @@ describe('updateOperationPathMethod (method only)', () => {
       }),
     })
     store.buildSidebar('test2')
-    const document = store.workspace.documents.test2!
+    const document = getOpenApiDocument(store, 'test2')!
     expect(document.tags?.[0]?.['x-scalar-order']).toStrictEqual([
       'test2/tag/products/GET/products',
       'test2/tag/products/DELETE/products',
@@ -172,7 +174,7 @@ describe('updateOperationPathMethod (method only)', () => {
       }),
     })
     store.buildSidebar('test3')
-    const document = store.workspace.documents.test3!
+    const document = getOpenApiDocument(store, 'test3')!
 
     let callbackResult: 'success' | 'no-change' | 'conflict' | undefined
 
@@ -186,8 +188,8 @@ describe('updateOperationPathMethod (method only)', () => {
     })
 
     expect(callbackResult).toBe('success')
-    expect(document.paths?.['/items']?.post).toBeDefined()
-    expect(document.paths?.['/items']?.get).toBeUndefined()
+    expect(getPathItemOperation(document.paths?.['/items'], 'post')).toBeDefined()
+    expect(getPathItemOperation(document.paths?.['/items'], 'get')).toBeUndefined()
   })
 })
 
@@ -208,7 +210,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users' },
@@ -258,7 +260,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'post', path: '/posts' },
@@ -310,7 +312,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users' },
@@ -354,7 +356,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users/{id}' },
@@ -397,7 +399,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users/{id}' },
@@ -441,7 +443,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users/{id}/{limit}' },
@@ -485,7 +487,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users/{id}' },
@@ -528,7 +530,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     updateOperationPathMethod(document, store, {
       meta: { method: 'get', path: '/users/{id}' },
@@ -567,7 +569,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     let callbackResult: 'success' | 'no-change' | 'conflict' | undefined
 
@@ -581,7 +583,7 @@ describe('updateOperationPathMethod (path only)', () => {
     })
 
     expect(callbackResult).toBe('success')
-    expect(document.paths?.['/api/items']?.get).toBeDefined()
+    expect(getPathItemOperation(document.paths?.['/api/items'], 'get')).toBeDefined()
     expect(document.paths?.['/items']).toBeUndefined()
   })
 
@@ -605,7 +607,7 @@ describe('updateOperationPathMethod (path only)', () => {
       }),
     })
     store.buildSidebar('test')
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
 
     let callbackResult: 'success' | 'no-change' | 'conflict' | undefined
 
@@ -620,8 +622,8 @@ describe('updateOperationPathMethod (path only)', () => {
 
     expect(callbackResult).toBe('conflict')
     // Original operations should remain unchanged
-    expect(document.paths?.['/items']?.get?.summary).toBe('Get items')
-    expect(document.paths?.['/api/items']?.get?.summary).toBe('Get API items')
+    expect(getPathItemOperation(document.paths?.['/items'], 'get')?.summary).toBe('Get items')
+    expect(getPathItemOperation(document.paths?.['/api/items'], 'get')?.summary).toBe('Get API items')
   })
 })
 
@@ -645,8 +647,8 @@ describe('createOperation', () => {
     })
 
     expect(normalizedPath).toBe('/users')
-    const document = store.workspace.documents.test!
-    expect(document.paths?.['/users']?.get).toEqual({
+    const document = getOpenApiDocument(store, 'test')!
+    expect(getPathItemOperation(document.paths?.['/users'], 'get')).toEqual({
       summary: 'Get users',
       description: 'Retrieve all users',
     })
@@ -670,8 +672,8 @@ describe('createOperation', () => {
     })
 
     expect(normalizedPath).toBe('/users')
-    const document = store.workspace.documents.test!
-    expect(document.paths?.['/users']?.post).toBeDefined()
+    const document = getOpenApiDocument(store, 'test')!
+    expect(getPathItemOperation(document.paths?.['/users'], 'post')).toBeDefined()
   })
 
   it('calls callback with success status', async () => {
@@ -752,9 +754,9 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
-    expect(document.paths?.['/users']?.get).toEqual({ summary: 'Get users' })
-    expect(document.paths?.['/users']?.post).toEqual({ summary: 'Create user' })
+    const document = getOpenApiDocument(store, 'test')!
+    expect(getPathItemOperation(document.paths?.['/users'], 'get')).toEqual({ summary: 'Get users' })
+    expect(getPathItemOperation(document.paths?.['/users'], 'post')).toEqual({ summary: 'Create user' })
   })
 
   it('adds operation server to document servers when it does not exist', async () => {
@@ -776,7 +778,7 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document.servers).toHaveLength(2)
     expect(document.servers).toContainEqual({ url: 'https://existing.example.com' })
     expect(document.servers).toContainEqual({ url: 'https://new.example.com' })
@@ -801,7 +803,7 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document.servers).toHaveLength(1)
     expect(document.servers?.[0]?.url).toBe('https://api.example.com')
   })
@@ -826,7 +828,7 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document.servers).toHaveLength(3)
     expect(document.servers).toContainEqual({ url: 'https://existing.example.com' })
     expect(document.servers).toContainEqual({ url: 'https://server1.example.com' })
@@ -854,7 +856,7 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document['x-scalar-selected-server']).toBe('https://new.example.com')
   })
 
@@ -877,7 +879,7 @@ describe('createOperation', () => {
       },
     })
 
-    const document = store.workspace.documents.test!
+    const document = getOpenApiDocument(store, 'test')!
     expect(document['x-scalar-selected-server']).toBe('https://existing.example.com')
   })
 })
@@ -911,9 +913,9 @@ describe('deleteOperation', () => {
       meta: { method: 'get', path: '/users' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    expect(document?.paths?.['/users']?.get).toBeUndefined()
-    expect(document?.paths?.['/users']?.post).toBeDefined()
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeUndefined()
+    expect(getPathItemOperation(document?.paths?.['/users'], 'post')).toBeDefined()
   })
 
   it('removes the path entry when the last operation is deleted', async () => {
@@ -936,8 +938,34 @@ describe('deleteOperation', () => {
       meta: { method: 'get', path: '/users' },
     })
 
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.paths?.['/users']).toBeUndefined()
+  })
+
+  it('keeps the path entry when path-level metadata remains after the last operation is deleted', async () => {
+    const store = createWorkspaceStore()
+    await store.addDocument({
+      name: 'test-doc',
+      document: createDocument({
+        paths: {
+          '/users': {
+            parameters: [{ name: 'tenant', in: 'header' }],
+            get: {
+              summary: 'Get users',
+            },
+          },
+        },
+      }),
+    })
+
+    deleteOperation(store, {
+      documentName: 'test-doc',
+      meta: { method: 'get', path: '/users' },
+    })
+
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeUndefined()
+    expect(getResolvedPathItem(document?.paths?.['/users'])?.parameters).toEqual([{ name: 'tenant', in: 'header' }])
   })
 
   it('no-ops when store is null', () => {
@@ -982,8 +1010,8 @@ describe('deleteOperation', () => {
       }),
     ).not.toThrow()
 
-    const document = store.workspace.documents['test-doc']
-    expect(document?.paths?.['/users']?.get).toBeDefined()
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeDefined()
   })
 
   it('no-ops when operation does not exist on path', async () => {
@@ -1008,8 +1036,8 @@ describe('deleteOperation', () => {
       }),
     ).not.toThrow()
 
-    const document = store.workspace.documents['test-doc']
-    expect(document?.paths?.['/users']?.get).toBeDefined()
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeDefined()
   })
 
   it('deletes operation and leaves other paths intact', async () => {
@@ -1034,10 +1062,10 @@ describe('deleteOperation', () => {
       meta: { method: 'get', path: '/users' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    expect(document?.paths?.['/users']?.get).toBeUndefined()
-    expect(document?.paths?.['/users']?.post).toBeDefined()
-    expect(document?.paths?.['/products']?.get).toBeDefined()
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeUndefined()
+    expect(getPathItemOperation(document?.paths?.['/users'], 'post')).toBeDefined()
+    expect(getPathItemOperation(document?.paths?.['/products'], 'get')).toBeDefined()
   })
 
   it('deletes multiple operations sequentially', async () => {
@@ -1064,10 +1092,10 @@ describe('deleteOperation', () => {
       meta: { method: 'post', path: '/users' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    expect(document?.paths?.['/users']?.get).toBeUndefined()
-    expect(document?.paths?.['/users']?.post).toBeUndefined()
-    expect(document?.paths?.['/users']?.delete).toBeDefined()
+    const document = getOpenApiDocument(store, 'test-doc')
+    expect(getPathItemOperation(document?.paths?.['/users'], 'get')).toBeUndefined()
+    expect(getPathItemOperation(document?.paths?.['/users'], 'post')).toBeUndefined()
+    expect(getPathItemOperation(document?.paths?.['/users'], 'delete')).toBeDefined()
   })
 })
 
@@ -1094,8 +1122,8 @@ describe('createOperationDraftExample', () => {
       exampleName: 'draft-1',
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     expect(operation?.['x-draft-examples']).toEqual(['existing', 'draft-1'])
   })
 
@@ -1120,8 +1148,8 @@ describe('createOperationDraftExample', () => {
       exampleName: 'draft-1',
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     expect(operation?.['x-draft-examples']).toEqual(['draft-1'])
   })
 
@@ -1147,8 +1175,8 @@ describe('createOperationDraftExample', () => {
       exampleName: 'draft-1',
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     expect(operation?.['x-draft-examples']).toEqual(['draft-1', 'draft-2'])
   })
 
@@ -1218,8 +1246,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'get', path: '/users', exampleKey: 'draft-1' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     expect(operation?.['x-draft-examples']).toEqual(['default', 'draft-2'])
   })
 
@@ -1254,8 +1282,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'get', path: '/users', exampleKey: 'custom' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     const param = getResolvedRef(operation?.parameters?.[0])
     assert(param && 'examples' in param)
     expect(param.examples?.default).toBeDefined()
@@ -1294,8 +1322,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'post', path: '/users', exampleKey: 'custom' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.post)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))
     const requestBody = getResolvedRef(operation?.requestBody)
     const examples = requestBody?.content?.['application/json']?.examples
     expect(examples?.default).toBeDefined()
@@ -1340,8 +1368,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'post', path: '/users', exampleKey: 'custom' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.post)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))
     const requestBody = getResolvedRef(operation?.requestBody)
     expect(requestBody?.content?.['application/json']?.examples?.default).toBeDefined()
     expect(requestBody?.content?.['application/json']?.examples?.custom).toBeUndefined()
@@ -1391,8 +1419,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'post', path: '/users', exampleKey: 'custom' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.post)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))
     const param = getResolvedRef(operation?.parameters?.[0])
     const requestBody = getResolvedRef(operation?.requestBody)
 
@@ -1475,8 +1503,8 @@ describe('deleteOperationExample', () => {
     ).not.toThrow()
 
     // Parameter example should still be deleted
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     const param = getResolvedRef(operation?.parameters?.[0])
     assert(param && 'examples' in param)
     expect(param.examples?.default).toBeUndefined()
@@ -1514,8 +1542,8 @@ describe('deleteOperationExample', () => {
       meta: { method: 'get', path: '/users', exampleKey: 'small' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     const param = getResolvedRef(operation?.parameters?.[0])
     assert(param && 'examples' in param)
     expect(param.examples?.default).toBeDefined()
@@ -1572,8 +1600,8 @@ describe('renameOperationExample', () => {
       payload: { name: 'renamed' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.post)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))
     const parameter = getResolvedRef(operation?.parameters?.[0])
     const requestBody = getResolvedRef(operation?.requestBody)
 
@@ -1619,8 +1647,8 @@ describe('renameOperationExample', () => {
       payload: { name: 'default' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.get)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'get'))
     const parameter = getResolvedRef(operation?.parameters?.[0])
 
     expect(operation?.['x-draft-examples']).toEqual(['default', 'custom'])
@@ -1660,8 +1688,8 @@ describe('renameOperationExample', () => {
       payload: { name: 'existing' },
     })
 
-    const document = store.workspace.documents['test-doc']
-    const operation = getResolvedRef(document?.paths?.['/users']?.post)
+    const document = getOpenApiDocument(store, 'test-doc')
+    const operation = getResolvedRef(getPathItemOperation(document?.paths?.['/users'], 'post'))
     const requestBody = getResolvedRef(operation?.requestBody)
     const examples = requestBody?.content?.['application/json']?.examples
 
@@ -1686,14 +1714,14 @@ describe('updateOperationMeta', () => {
         },
       }),
     })
-    const document = store.workspace.documents['meta-test']!
+    const document = getOpenApiDocument(store, 'meta-test')!
 
     updateOperationMeta(store, document, {
       meta: { method: 'get', path: '/users' },
       payload: { description: 'Updated description' },
     })
 
-    const operation = getResolvedRef(document.paths?.['/users']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/users'], 'get'))
     expect(operation?.description).toBe('Updated description')
     expect(operation?.summary).toBe('Get users')
   })
@@ -1713,14 +1741,14 @@ describe('updateOperationMeta', () => {
         },
       }),
     })
-    const document = store.workspace.documents['meta-test-summary']!
+    const document = getOpenApiDocument(store, 'meta-test-summary')!
 
     updateOperationMeta(store, document, {
       meta: { method: 'get', path: '/pets' },
       payload: { summary: 'Get all pets' },
     })
 
-    const operation = getResolvedRef(document.paths?.['/pets']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/pets'], 'get'))
     expect(operation?.summary).toBe('Get all pets')
     expect(operation?.description).toBe('Returns all pets')
   })
@@ -1740,14 +1768,14 @@ describe('updateOperationMeta', () => {
         },
       }),
     })
-    const document = store.workspace.documents['meta-test-deprecated']!
+    const document = getOpenApiDocument(store, 'meta-test-deprecated')!
 
     updateOperationMeta(store, document, {
       meta: { method: 'get', path: '/legacy' },
       payload: { deprecated: true },
     })
 
-    const operation = getResolvedRef(document.paths?.['/legacy']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/legacy'], 'get'))
     expect(operation?.deprecated).toBe(true)
     expect(operation?.summary).toBe('Legacy endpoint')
   })
@@ -1768,7 +1796,7 @@ describe('updateOperationMeta', () => {
         },
       }),
     })
-    const document = store.workspace.documents['meta-test-multi']!
+    const document = getOpenApiDocument(store, 'meta-test-multi')!
 
     updateOperationMeta(store, document, {
       meta: { method: 'post', path: '/items' },
@@ -1779,7 +1807,7 @@ describe('updateOperationMeta', () => {
       },
     })
 
-    const operation = getResolvedRef(document.paths?.['/items']?.post)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/items'], 'post'))
     expect(operation?.summary).toBe('Create item')
     expect(operation?.description).toBe('Creates a new item')
     expect(operation?.deprecated).toBe(true)
@@ -1798,14 +1826,14 @@ describe('updateOperationMeta', () => {
       }),
     })
     store.buildSidebar('meta-test-null-doc')
-    const document = store.workspace.documents['meta-test-null-doc']!
+    const document = getOpenApiDocument(store, 'meta-test-null-doc')!
 
     updateOperationMeta(store, null, {
       meta: { method: 'get', path: '/users' },
       payload: { description: 'Should not apply' },
     })
 
-    const operation = getResolvedRef(document.paths?.['/users']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/users'], 'get'))
     expect(operation?.description).toBe('Original')
   })
 
@@ -1821,14 +1849,14 @@ describe('updateOperationMeta', () => {
         },
       }),
     })
-    const document = store.workspace.documents['meta-test-null-store']!
+    const document = getOpenApiDocument(store, 'meta-test-null-store')!
 
     updateOperationMeta(null, document, {
       meta: { method: 'get', path: '/users' },
       payload: { description: 'Should not apply' },
     })
 
-    const operation = getResolvedRef(document.paths?.['/users']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/users'], 'get'))
     expect(operation?.description).toBe('Original')
   })
 
@@ -1847,7 +1875,7 @@ describe('updateOperationMeta', () => {
       payload: { description: 'Should not apply' },
     })
 
-    const operation = getResolvedRef(document.paths?.['/users']?.get)
+    const operation = getResolvedRef(getPathItemOperation(document.paths?.['/users'], 'get'))
     expect(operation?.summary).toBe('Get users')
 
     expect(Object.keys(document.paths ?? {})).toEqual(['/users'])

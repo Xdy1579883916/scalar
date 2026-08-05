@@ -1,10 +1,15 @@
 // import { replaceEnvVariables } from '@scalar/helpers/regex/replace-variables'
 import { isObject } from '@scalar/helpers/object/is-object'
+import { setValueAtPath } from '@scalar/helpers/object/set-value-at-path'
+import { getResolvedRef, mergeSiblingReferences } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import { unpackProxyObject } from '@scalar/workspace-store/helpers/unpack-proxy'
+import type { SchemaObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import type { RequestBodyObject } from '@scalar/workspace-store/schemas/v3.1/strict/request-body'
 
 import { getExampleFromBody } from './get-request-body-example'
 import { getSelectedBodyContentType } from './get-selected-body-content-type'
+import { buildDottedNestedRowPredicate, coerceLeafValueToSchemaType, resolveLeafSchema } from './schema-value-coercion'
+import { serializeFormPropertyWithEncoding } from './serialize-form-property'
 
 type FormData = {
   mode: 'formdata'
@@ -93,13 +98,72 @@ export const buildRequestBody = (
             value: [],
           }
 
+    // When a multipart form was built from a nested object schema the UI emits leaf
+    // rows with dotted names (e.g. `props.name`). Regroup them so the wire still gets
+    // one JSON multipart part per top-level object property — matching the
+    // OpenAPI 3.x multipart-as-JSON default. Url-encoded forms do not nest, so we
+    // skip this for them. The predicate is schema-driven, so a user-named row like
+    // `user.email` whose top-level prefix is not a nested object stays flat.
+    //
+    // Single pass: flat rows go into `entries` as-is; for each dotted-nested row, we
+    // lazily allocate the regrouped object for its top-level key and push it into
+    // `entries` at the position of the *first* matching row, then keep folding leaves
+    // into the same live object reference so interleaved flat rows keep their order.
+    const multipartSchema =
+      result.mode === 'formdata'
+        ? (getResolvedRef(requestBody.content[bodyContentType]?.schema, mergeSiblingReferences) as
+            | SchemaObject
+            | undefined)
+        : undefined
+    const isDottedNestedRow = result.mode === 'formdata' ? buildDottedNestedRowPredicate(multipartSchema) : () => false
+
+    const entries: { name: string; value: unknown }[] = []
+    const regroupedByTopKey = new Map<string, Record<string, unknown>>()
+
+    for (const row of exampleValue) {
+      if (!isDottedNestedRow(row.name, row.value)) {
+        entries.push(row)
+        continue
+      }
+      const segments = row.name.split('.')
+      const topKey = segments[0]
+      if (!topKey) {
+        continue
+      }
+      let target = regroupedByTopKey.get(topKey)
+      if (!target) {
+        target = {}
+        regroupedByTopKey.set(topKey, target)
+        entries.push({ name: topKey, value: target })
+      }
+      // The form table stringifies leaf values; restore the schema-declared type so the
+      // regrouped JSON part keeps booleans/numbers/arrays instead of string-typing them.
+      setValueAtPath(
+        target,
+        segments.slice(1),
+        coerceLeafValueToSchemaType(row.value, resolveLeafSchema(multipartSchema, segments)),
+      )
+    }
+
     // Loop over all entries and add them to the form
-    exampleValue.forEach(({ name, value }) => {
+    entries.forEach(({ name, value }) => {
       if (!name) {
         return
       }
-      const partContentType =
-        result.mode === 'formdata' ? getMultipartEncodingContentType(requestBody, bodyContentType, name) : undefined
+      const partEncoding = requestBody.content[bodyContentType]?.encoding?.[name]
+
+      // When the encoding sets style/explode, serialize objects/arrays RFC6570-style
+      // (bracket or exploded notation) instead of JSON, so the wire request matches the
+      // generated code snippet.
+      const styleParts = serializeFormPropertyWithEncoding(name, value, partEncoding)
+      if (styleParts) {
+        for (const part of styleParts) {
+          result.value.push({ type: 'text', key: part.key, value: part.value })
+        }
+        return
+      }
+
+      const partContentType = result.mode === 'formdata' ? partEncoding?.contentType : undefined
 
       // Handle file uploads
       if (value instanceof File && result.mode === 'formdata') {
@@ -163,6 +227,17 @@ export const buildRequestBody = (
     // Convert object properties to form fields
     for (const [key, value] of Object.entries(example.value)) {
       if (key && value !== undefined && value !== null) {
+        const partEncoding = requestBody.content[bodyContentType]?.encoding?.[key]
+
+        // Encoding style/explode turns objects into bracket or exploded notation.
+        const styleParts = serializeFormPropertyWithEncoding(key, value, partEncoding)
+        if (styleParts) {
+          for (const part of styleParts) {
+            result.value.push({ key: part.key, value: part.value })
+          }
+          continue
+        }
+
         const stringValue =
           typeof value === 'object' && value !== null ? JSON.stringify(unpackProxyObject(value)) : String(value)
         result.value.push({
@@ -184,6 +259,18 @@ export const buildRequestBody = (
 
     for (const [key, value] of Object.entries(example.value)) {
       if (!key || value === undefined || value === null) {
+        continue
+      }
+
+      const partEncoding = requestBody.content[bodyContentType]?.encoding?.[key]
+
+      // Encoding style/explode turns objects into bracket or exploded notation instead of
+      // the default single JSON part.
+      const styleParts = serializeFormPropertyWithEncoding(key, value, partEncoding)
+      if (styleParts) {
+        for (const part of styleParts) {
+          result.value.push({ type: 'text', key: part.key, value: part.value })
+        }
         continue
       }
 

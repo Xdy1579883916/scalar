@@ -1,4 +1,4 @@
-import type { ReferenceObject } from './reference'
+import type { ReferenceObject } from './reference.js'
 export type PrimitiveSchemaType = 'null' | 'boolean' | 'string' | 'number' | 'integer' | 'object' | 'array'
 export type StringFormat =
   | 'date'
@@ -144,10 +144,16 @@ export type MultiTypeObject = SharedProperties &
   StringKeywords &
   ArrayKeywords &
   ObjectKeywords & {
-    type?: PrimitiveSchemaType | PrimitiveSchemaType[]
+    /**
+     * MultiTypeObject only models the array form. Single-type schemas are
+     * covered by the dedicated variants (OtherTypes, NumericObject,
+     * StringObject, ObjectObject, ArrayObject) of the SchemaObject union.
+     */
+    type: PrimitiveSchemaType[]
     format?: StringFormat | NumericFormat
   } & Extensions
 export type SchemaObject =
+  | boolean
   | UntypedObject
   | OtherTypes
   | NumericObject

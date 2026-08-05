@@ -1,10 +1,12 @@
 import type { WorkspaceStore } from '@/client'
 import type { TagEvents } from '@/events/definitions/tag'
+import { forEachPathItemOperation, getPathItemOperation } from '@/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@/helpers/get-resolved-ref'
 import { unpackProxyObject } from '@/helpers/unpack-proxy'
 import { getNavigationOptions } from '@/navigation/get-navigation-options'
 import { getTagEntries } from '@/navigation/helpers/get-tag-entries'
 import { updateOrderIds } from '@/navigation/helpers/update-order-ids'
+import { isOpenApiDocument } from '@/schemas/type-guards'
 
 /**
  * Adds a new tag to the WorkspaceDocument's `tags` array.
@@ -17,7 +19,7 @@ import { updateOrderIds } from '@/navigation/helpers/update-order-ids'
 export const createTag = (store: WorkspaceStore | null, payload: TagEvents['tag:create:tag']) => {
   const document = store?.workspace.documents[payload.documentName]
 
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     console.error('Document not found', { payload, store })
     return
   }
@@ -39,9 +41,13 @@ export const createTag = (store: WorkspaceStore | null, payload: TagEvents['tag:
  */
 export const editTag = (store: WorkspaceStore | null, payload: TagEvents['tag:edit:tag']) => {
   const document = store?.workspace.documents[payload.documentName]
-  const documentNavigation = document?.['x-scalar-navigation']
-  if (!document || !documentNavigation) {
+  if (!store || !isOpenApiDocument(document)) {
     console.error('Document not found', { payload, store })
+    return
+  }
+  const documentNavigation = document['x-scalar-navigation']
+  if (!documentNavigation) {
+    console.error('Document navigation missing', { payload, store })
     return
   }
 
@@ -60,7 +66,7 @@ export const editTag = (store: WorkspaceStore | null, payload: TagEvents['tag:ed
   payload.tag.children?.forEach((child) => {
     // Operation
     if (child.type === 'operation') {
-      const operation = getResolvedRef(document.paths?.[child.path]?.[child.method])
+      const operation = getResolvedRef(getPathItemOperation(document.paths?.[child.path], child.method))
 
       if (operation && 'tags' in operation) {
         const plainTags = unpackProxyObject(operation.tags, { depth: null })
@@ -70,7 +76,7 @@ export const editTag = (store: WorkspaceStore | null, payload: TagEvents['tag:ed
 
     // Webhook
     else if (child.type === 'webhook') {
-      const webhook = getResolvedRef(document.webhooks?.[child.name]?.[child.method])
+      const webhook = getResolvedRef(getPathItemOperation(document.webhooks?.[child.name], child.method))
 
       if (webhook && 'tags' in webhook) {
         const plainTags = unpackProxyObject(webhook.tags, { depth: null })
@@ -117,19 +123,14 @@ export const editTag = (store: WorkspaceStore | null, payload: TagEvents['tag:ed
  */
 export const deleteTag = (workspace: WorkspaceStore | null, payload: TagEvents['tag:delete:tag']) => {
   const document = workspace?.workspace.documents[payload.documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
   // Clear tags from all operations that have this tag
-  Object.values(document.paths ?? {}).forEach((path) => {
-    Object.values(path).forEach((operation) => {
-      // Only process operations that are objects
-      if (typeof operation !== 'object' || Array.isArray(operation)) {
-        return
-      }
-
-      const resolvedOperation = getResolvedRef(operation)
+  Object.values(document.paths ?? {}).forEach((pathItemRef) => {
+    forEachPathItemOperation(pathItemRef, (_method, operationRef) => {
+      const resolvedOperation = getResolvedRef(operationRef)
 
       if ('tags' in resolvedOperation) {
         const plainTags = unpackProxyObject(resolvedOperation.tags, { depth: 1 })
@@ -139,13 +140,9 @@ export const deleteTag = (workspace: WorkspaceStore | null, payload: TagEvents['
   })
 
   // Remove the tag from all webhooks that have this tag
-  Object.values(document.webhooks ?? {}).forEach((webhook) => {
-    Object.values(webhook).forEach((operation) => {
-      if (typeof operation !== 'object' || Array.isArray(operation)) {
-        return
-      }
-
-      const resolvedOperation = getResolvedRef(operation)
+  Object.values(document.webhooks ?? {}).forEach((pathItemRef) => {
+    forEachPathItemOperation(pathItemRef, (_method, operationRef) => {
+      const resolvedOperation = getResolvedRef(operationRef)
 
       const plainTags = unpackProxyObject(resolvedOperation.tags, { depth: 1 })
       resolvedOperation.tags = plainTags?.filter((tag) => tag !== payload.name)

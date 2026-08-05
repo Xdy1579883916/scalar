@@ -1,6 +1,6 @@
-import type { ApiReferenceEvents } from '@scalar/workspace-store/events'
+import type { AnyEventListener, ApiReferenceEvents, WorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { RequestFactory, VariablesStore } from '@scalar/workspace-store/request-example'
-import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+import type { OpenApiDocument, ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import type { OperationObject } from '@scalar/workspace-store/schemas/v3.1/strict/operation'
 import type { Component, DefineComponent } from 'vue'
 
@@ -29,23 +29,98 @@ export type ResponseBodyHandler = ResponseBodyHandlerBase &
 
 /** A type representing the hooks that a client plugin can define */
 type ClientPluginHooks = {
+  /**
+   * Runs when an operation view mounts, before any request is sent. Useful for warming up
+   * resources that would otherwise add latency to the first request (for example, lazily
+   * created sandboxes). Receives the current document and operation so plugins can decide
+   * whether the work is needed at all.
+   */
+  onRequestMount: (payload: { document: OpenApiDocument; operation: OperationObject }) => void | Promise<void>
+  /**
+   * Runs before a request is sent. Receives the current document and operation so plugins can
+   * modify the request before it is sent (for example, adding headers or modifying the body).
+   *
+   * Mutations here happen on the request builder, before the fetch `Request` exists. Outside
+   * Electron, use the `requestBuilt` hook when you need the exact outgoing request (for example,
+   * to hash a multipart body for request signing). Electron sends the request payload instead.
+   */
   beforeRequest: (payload: {
     /** Workspace-store request spec; mutable by pre-request scripts (headers, method). */
     requestBuilder: RequestFactory
     document: OpenApiDocument
     operation: OperationObject
     variablesStore?: VariablesStore
+    /** Active server, so plugins can resolve relative URLs (e.g. a token endpoint). */
+    server?: ServerObject | null
+    /** Host fetch, so plugins can run network calls (e.g. a token refresh) through the same channel as the request. */
+    customFetch?: typeof fetch
   }) => void | Promise<void>
+  /**
+   * Runs after the fetch `Request` has been built, right before it is sent. Outside Electron, the
+   * request passed here is handed to fetch, so header mutations apply to the outgoing request and
+   * the body bytes match what goes over the wire. Electron sends the request payload instead.
+   * Mutations to the request builder have no effect at this stage; use `beforeRequest` for those.
+   */
+  requestBuilt: (payload: {
+    /** The fetch Request built before sending. Electron sends the request payload instead. */
+    request: Request
+    /** Request builder the request was built from. Mutating it has no effect at this stage. */
+    requestBuilder: RequestFactory
+    document: OpenApiDocument
+    operation: OperationObject
+    variablesStore?: VariablesStore
+  }) => void | Promise<void>
+  /**
+   * Runs after a response is received. Receives the current document and operation so plugins can
+   * modify the response after it is received (for example, adding headers or modifying the body).
+   */
   responseReceived: (payload: {
     response: Response
     /** Request builder object that was used to build the request. Mutating this object will not affect the request object. */
     requestBuilder: RequestFactory
-    /** Request object that was sent to the server. */
+    /** Request rebuilt from the sent request payload, not the same instance sent to the server. */
     request: Request
     document: OpenApiDocument
     operation: OperationObject
     variablesStore?: VariablesStore
   }) => void | Promise<void>
+}
+
+/** Direction of a WebSocket message frame */
+export type WebSocketFrameDirection = 'incoming' | 'outgoing'
+
+/** Opcode classification for a WebSocket frame */
+export type WebSocketFrameType = 'text' | 'binary' | 'close'
+
+/** A single WebSocket message frame (sent or received) */
+export type WebSocketPluginFrame = {
+  direction: WebSocketFrameDirection
+  timestamp: number
+  data: string | ArrayBuffer
+  opcode: WebSocketFrameType
+}
+
+/** Close event metadata for WebSocket plugin hooks */
+export type WebSocketPluginCloseInfo = {
+  code: number
+  reason: string
+  wasClean: boolean
+}
+
+/**
+ * WebSocket-specific plugin hooks for AsyncAPI channel operations.
+ *
+ * These are intentionally separate from the HTTP `ClientPluginHooks` because
+ * the WebSocket lifecycle (long-lived connection, bidirectional frames) does
+ * not map onto request/response semantics.
+ */
+export type ClientPluginWebSocketHooks = {
+  /** Runs before the WebSocket handshake. Return a modified URL to override. */
+  beforeConnect: (payload: { url: string }) => string | void | Promise<string | void>
+  /** Runs for every incoming or outgoing frame on an open connection. */
+  onWebSocketMessage: (payload: { frame: WebSocketPluginFrame }) => void | Promise<void>
+  /** Runs when the connection closes (cleanly or due to error). */
+  onWebSocketClose: (payload: { info: WebSocketPluginCloseInfo }) => void | Promise<void>
 }
 
 /** A vue component which accepts the specified props */
@@ -82,14 +157,18 @@ type ClientPluginComponents = {
  *
  * const myPlugin: ClientPlugin = {
  *   hooks: {
- *     beforeRequest: ({ request }) => {
- *       request.headers.set('X-Custom-Header', 'foo');
- *       return { request };
+ *     beforeRequest: async ({ requestBuilder, server, customFetch }) => {
+ *       console.log('Active server configuration:', server?.url);
+ *
+ *       if (customFetch) {
+ *         await customFetch('https://auth.example.com/session/refresh', { method: 'POST' });
+ *       }
+ *
+ *       requestBuilder.headers.set('X-Custom-Header', 'foo');
  *     },
- *     responseReceived: async (response, operation) => {
+ *     responseReceived: ({ response, operation }) => {
  *       // Handle post-response logic
- *       const data = await response.json();
- *       console.log('Received:', data, 'for operation:', operation.operationId);
+ *       console.log('Received status:', response.status, 'for operation:', operation.operationId);
  *     }
  *   },
  *   components: {
@@ -118,13 +197,62 @@ type ClientPluginLifecycle = {
 
 export type ClientPlugin = {
   hooks?: Partial<ClientPluginHooks>
+  /** WebSocket-specific hooks for AsyncAPI channel operations */
+  webSocketHooks?: Partial<ClientPluginWebSocketHooks>
   components?: Partial<ClientPluginComponents>
   /** Lifecycle hooks for app-level concerns */
   lifecycle?: ClientPluginLifecycle
-  /** Subscribe to event bus events. The framework handles subscribe/unsubscribe automatically. */
-  on?: Partial<{ [K in keyof ApiReferenceEvents]: (payload: ApiReferenceEvents[K]) => void }>
+  /**
+   * Subscribe to every event on the bus. The framework wires this up to
+   * `bus.onAny` and handles subscribe/unsubscribe automatically.
+   *
+   * The listener receives a single tagged-union argument `{ event, payload }`
+   * where `event` is the discriminant. Narrowing on `event` automatically
+   * narrows `payload` to the exact type for that event — no casts, no `as`
+   * assertions, and no manual runtime type checks just to satisfy the
+   * compiler. Destructuring in the parameter list works too.
+   *
+   * @example
+   * on: ({ event, payload }) => {
+   *   if (event === 'log:user-login') {
+   *     // payload is narrowed to { uid: string; email?: string; teamUid: string }
+   *     posthog.identify(payload.uid, { email: payload.email })
+   *   }
+   *
+   *   if (event === 'operation:create:operation') {
+   *     // payload is narrowed to the operation-create payload
+   *     analytics.track('operation_created', payload)
+   *   }
+   * }
+   */
+  on?: AnyEventListener
   /** Custom response body handlers for specific content types */
   responseBody?: ResponseBodyHandler[]
+}
+
+/**
+ * Subscribes a single plugin's `on` listener to the given event bus via `onAny`.
+ *
+ * The plugin's `on` is passed straight through to `bus.onAny`, so it will
+ * receive every event emitted on the bus as a `{ event, payload }` object.
+ * Plugins without an `on` listener get a no-op unsubscribe.
+ *
+ * Returns an unsubscribe function. Call it when the plugin is torn down or
+ * the bus is destroyed to remove the wildcard listener.
+ *
+ * @example
+ * const unsubscribe = subscribePluginEvents(eventBus, plugin)
+ * // later...
+ * unsubscribe()
+ */
+export const subscribePluginEvents = (eventBus: WorkspaceEventBus, plugin: ClientPlugin): (() => void) => {
+  if (!plugin.on) {
+    return () => {
+      // no-op
+    }
+  }
+
+  return eventBus.onAny(plugin.on)
 }
 
 /**
@@ -152,6 +280,37 @@ export const executeHook = async <K extends keyof HookPayloadMap>(
     if (hook) {
       const modifiedPayload = await hook(currentPayload as any)
       currentPayload = (modifiedPayload ?? currentPayload) as HookPayloadMap[K]
+    }
+  }
+
+  return currentPayload
+}
+
+type WebSocketHookPayloadMap = {
+  [K in keyof ClientPluginWebSocketHooks]: Parameters<ClientPluginWebSocketHooks[K]>[0]
+}
+
+/**
+ * Execute a WebSocket plugin hook across all plugins.
+ *
+ * For `beforeConnect`, the returned URL string (if any) is threaded through
+ * sequentially so each plugin can transform the URL. For fire-and-forget hooks
+ * (`onWebSocketMessage`, `onWebSocketClose`) the return value is ignored.
+ */
+export const executeWebSocketHook = async <K extends keyof WebSocketHookPayloadMap>(
+  payload: WebSocketHookPayloadMap[K],
+  hookName: K,
+  plugins: ClientPlugin[],
+): Promise<WebSocketHookPayloadMap[K]> => {
+  let currentPayload = payload
+
+  for (const plugin of plugins) {
+    const hook = plugin.webSocketHooks?.[hookName]
+    if (hook) {
+      const result = await (hook as (p: WebSocketHookPayloadMap[K]) => unknown)(currentPayload)
+      if (hookName === 'beforeConnect' && typeof result === 'string') {
+        currentPayload = { ...currentPayload, url: result } as WebSocketHookPayloadMap[K]
+      }
     }
   }
 

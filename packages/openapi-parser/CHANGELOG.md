@@ -1,5 +1,31 @@
 # @scalar/openapi-parser
 
+## 0.28.11
+
+## 0.28.10
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.28.9
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.28.8
+
+## 0.28.7
+
+## 0.28.6
+
+## 0.28.5
+
+## 0.28.4
+
+## 0.28.3
+
 ## 0.28.2
 
 ## 0.28.1

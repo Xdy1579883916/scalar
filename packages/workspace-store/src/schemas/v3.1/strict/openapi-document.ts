@@ -13,6 +13,10 @@ import {
   XScalarOriginalDocumentHashSchema,
 } from '@/schemas/extensions/document/x-scalar-original-document-hash'
 import {
+  type XScalarOriginalSourceUrl,
+  XScalarOriginalSourceUrlSchema,
+} from '@/schemas/extensions/document/x-scalar-original-source-url'
+import {
   type XScalarRegistryMeta,
   XScalarRegistryMetaSchema,
 } from '@/schemas/extensions/document/x-scalar-registry-meta'
@@ -31,6 +35,9 @@ import {
 } from '@/schemas/extensions/server/x-scalar-selected-server'
 import { type XTagGroups, XTagGroupsSchema } from '@/schemas/extensions/tag/x-tag-groups'
 import {
+  TraversedAsyncApiChannelSchemaDefinition,
+  TraversedAsyncApiMessageSchemaDefinition,
+  TraversedAsyncApiOperationSchemaDefinition,
   TraversedDescriptionSchemaDefinition,
   type TraversedDocument,
   TraversedDocumentSchemaDefinition,
@@ -62,7 +69,6 @@ import {
   ComponentsObjectRef,
   ExternalDocumentationObjectRef,
   InfoObjectRef,
-  PathItemObjectRef,
   PathsObjectRef,
   REF_DEFINITIONS,
   SecurityRequirementObjectRef,
@@ -85,10 +91,10 @@ export const OpenApiExtensionsSchema = compose(
   Type.Partial(
     Type.Object({
       'x-original-oas-version': Type.String(),
-      'x-scalar-original-source-url': Type.String(),
       [extensions.document.navigation]: TraversedDocumentObjectRef,
     }),
   ),
+  XScalarOriginalSourceUrlSchema,
   XTagGroupsSchema,
   xScalarEnvironmentsSchema,
   XScalarSelectedServerSchema,
@@ -106,10 +112,9 @@ export const OpenApiExtensionsSchema = compose(
 
 export type OpenAPIExtensions = Partial<{
   'x-original-oas-version': string
-  /** Original document source url / when loading a document from an external source */
-  'x-scalar-original-source-url': string
   [extensions.document.navigation]: TraversedDocument
 }> &
+  XScalarOriginalSourceUrl &
   XScalarOriginalDocumentHash &
   XTagGroups &
   XScalarEnvironments &
@@ -137,7 +142,7 @@ const OpenApiDocumentSchemaDefinition = compose(
     /** The available paths and operations for the API. */
     paths: Type.Optional(PathsObjectRef),
     /** The incoming webhooks that MAY be received as part of this API and that the API consumer MAY choose to implement. Closely related to the callbacks feature, this section describes requests initiated other than by an API call, for example by an out of band registration. The key name is a unique string to refer to each webhook, while the (optionally referenced) Path Item Object describes a request that may be initiated by the API provider and the expected responses. An example is available. */
-    webhooks: Type.Optional(Type.Record(Type.String(), PathItemObjectRef)),
+    webhooks: Type.Optional(PathsObjectRef),
     /** An element to hold various Objects for the OpenAPI Description. */
     components: Type.Optional(ComponentsObjectRef),
     /** A declaration of which security mechanisms can be used across the API. The list of values includes alternative Security Requirement Objects that can be used. Only one of the Security Requirement Objects need to be satisfied to authorize a request. Individual operations can override this definition. The list can be incomplete, up to being empty or absent. To make security explicitly optional, an empty security requirement ({}) can be included in the array. */
@@ -213,6 +218,9 @@ const module = Type.Module({
   // Navigation schemas
   [REF_DEFINITIONS.TraversedDescriptionObject]: TraversedDescriptionSchemaDefinition,
   [REF_DEFINITIONS.TraversedOperationObject]: TraversedOperationSchemaDefinition,
+  [REF_DEFINITIONS.TraversedAsyncApiOperationObject]: TraversedAsyncApiOperationSchemaDefinition,
+  [REF_DEFINITIONS.TraversedAsyncApiChannelObject]: TraversedAsyncApiChannelSchemaDefinition,
+  [REF_DEFINITIONS.TraversedAsyncApiMessageObject]: TraversedAsyncApiMessageSchemaDefinition,
   [REF_DEFINITIONS.TraversedSchemaObject]: TraversedSchemaSchemaDefinition,
   [REF_DEFINITIONS.TraversedWebhookObject]: TraversedWebhookSchemaDefinition,
   [REF_DEFINITIONS.TraversedTagObject]: TraversedTagSchemaDefinition,

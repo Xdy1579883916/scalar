@@ -1,7 +1,8 @@
-import { type ModalState, useModal } from '@scalar/components'
-import type { ClientPlugin } from '@scalar/oas-utils/helpers'
+import { type ModalState, useModal } from '@scalar/components/modal'
+import { type ClientPlugin, subscribePluginEvents } from '@scalar/oas-utils/helpers'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import { type WorkspaceEventBus, createWorkspaceEventBus } from '@scalar/workspace-store/events'
+import { isOpenApiDocument } from '@scalar/workspace-store/schemas/type-guards'
 import { type App, type MaybeRefOrGetter, computed, createApp, isRef, reactive, ref, toValue, watch } from 'vue'
 
 import {
@@ -9,9 +10,9 @@ import {
   type RoutePayload,
   resolveRouteParameters,
 } from '@/v2/features/modal/helpers/resolve-route-parameters'
-import type { ApiClientOptions, ApiClientOptionsRef } from '@/v2/types/options'
 import { useModalSidebar } from '@/v2/features/modal/hooks/use-modal-sidebar'
 import Modal, { type ModalProps } from '@/v2/features/modal/Modal.vue'
+import type { ApiClientOptions, ApiClientOptionsRef } from '@/v2/types/options'
 
 type CreateApiClientOptions = {
   /** Element to mount the client modal to. */
@@ -39,6 +40,18 @@ export type ApiClientModal = {
   updateOptions: (nextOptions: ApiClientOptions, overwrite?: boolean) => void
   modalState: ModalState
 }
+
+/**
+ * Monotonic counter used to give every modal Vue app a unique `idPrefix`.
+ *
+ * Vue derives `useId()` values (and therefore our teleport target ids) from the app's
+ * `idPrefix`. When more than one client app mounts on the same page — for example, the
+ * API reference embeds this modal alongside another client instance — a shared prefix
+ * makes both apps emit identical ids. A teleported popover then resolves to the first
+ * matching target in the DOM, which can be a hidden app, so the popover never appears.
+ * A per-app suffix keeps the ids unique across instances.
+ */
+let modalAppCount = 0
 
 /**
  * Creates the API Client Modal.
@@ -81,8 +94,11 @@ export const createApiClientModal = ({
   const path = computed(() => resolvedParameters.value.path)
   const method = computed(() => resolvedParameters.value.method)
   const exampleName = computed(() => resolvedParameters.value.example)
-  /** The document from the workspace store. */
-  const document = computed(() => workspaceStore.workspace.documents[documentSlug.value ?? ''] ?? null)
+  /** The document from the workspace store. Modal is OpenAPI-only; AsyncAPI docs surface as null. */
+  const document = computed(() => {
+    const doc = workspaceStore.workspace.documents[documentSlug.value ?? '']
+    return isOpenApiDocument(doc) ? doc : null
+  })
 
   /** Sidebar state and selection handling. */
   const sidebarState = useModalSidebar({
@@ -120,11 +136,7 @@ export const createApiClientModal = ({
   for (const plugin of plugins) {
     plugin.lifecycle?.onInit?.()
 
-    if (plugin.on) {
-      for (const [event, handler] of Object.entries(plugin.on)) {
-        pluginUnsubscribes.push(eventBus.on(event as any, handler as any))
-      }
-    }
+    pluginUnsubscribes.push(subscribePluginEvents(eventBus, plugin))
   }
 
   /** Clean up plugin lifecycle and event bus subscriptions when the app is unmounted */
@@ -149,8 +161,9 @@ export const createApiClientModal = ({
     { immediate: true },
   )
 
-  // Use a unique id prefix to prevent collisions with other Vue apps on the page
-  app.config.idPrefix = 'scalar-client'
+  // Use a unique id prefix to prevent collisions with other Vue apps on the page.
+  // The suffix keeps the prefix unique even when several client apps mount together.
+  app.config.idPrefix = `scalar-client-${modalAppCount++}`
 
   /** Mount the modal to a given element. */
   const mount = (mountingEl: HTMLElement | null = el): void => {

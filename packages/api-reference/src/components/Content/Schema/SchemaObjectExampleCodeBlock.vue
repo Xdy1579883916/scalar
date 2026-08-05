@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ExamplePicker } from '@scalar/api-client/blocks/operation-code-sample'
+import { ExamplePicker } from '@scalar/blocks/code-example'
 import {
   ScalarCard,
   ScalarCardFooter,
   ScalarCardSection,
-  ScalarCodeBlock,
-} from '@scalar/components'
+} from '@scalar/components/card'
+import { ScalarCodeBlock } from '@scalar/components/code-block'
 import type { SchemaObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed, ref } from 'vue'
 

@@ -1,5 +1,67 @@
 # @scalar/api-client-react
 
+## 2.0.37
+
+## 2.0.36
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 2.0.35
+
+## 2.0.34
+
+## 2.0.33
+
+## 2.0.32
+
+## 2.0.31
+
+## 2.0.30
+
+## 2.0.29
+
+## 2.0.28
+
+### Patch Changes
+
+- [#8519](https://github.com/scalar/scalar/pull/8519): refactor: extract the code example block into `@scalar/blocks/code-example`. `api-client`, `api-client-react`, and `api-reference` now import `CodeExample`, `findClient`, `generateClientOptions`, and the related helpers from the new package. `workspace-store` exports `isParamDisabled` with an optional `defaultDisabled` argument.
+
+  **Breaking (`@scalar/api-client`):** the `@scalar/api-client/blocks/operation-code-sample` and `@scalar/api-client/v2/blocks/operation-code-sample` export paths have been removed. Import from `@scalar/blocks/code-example` instead, and use the renamed `CodeExample` / `CodeExampleProps` (previously `OperationCodeSample` / `OperationCodeSampleProps`).
+
+## 2.0.27
+
+## 2.0.26
+
+## 2.0.25
+
+## 2.0.24
+
+## 2.0.23
+
+## 2.0.22
+
+## 2.0.21
+
+## 2.0.20
+
+## 2.0.19
+
+## 2.0.18
+
+### Patch Changes
+
+- [#9249](https://github.com/scalar/scalar/pull/9249): fix: restore inline OpenAPI document support via the `content` configuration field in `useApiClient`
+
+## 2.0.17
+
+## 2.0.16
+
+## 2.0.15
+
+## 2.0.14
+
 ## 2.0.13
 
 ## 2.0.12

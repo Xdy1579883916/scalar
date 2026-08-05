@@ -127,22 +127,75 @@ export type AuthEvents = {
   /**
    * Update the selected scopes for a given security scheme.
    * Triggers when the user selects/deselects scopes for an OAuth2 (or other scopes-supporting) scheme in the UI.
+   *
+   * Provide either:
+   * - `scopes`: the absolute scope list (used by bulk actions like "Select All" / "Deselect All"), or
+   * - `scope` together with `selected`: a single-scope toggle applied against the scopes currently
+   *   stored in the auth state. Toggling against the stored value (rather than a snapshot computed in
+   *   the component) keeps rapid successive clicks from racing and dropping each other's changes.
+   *
+   * A payload that provides neither (or `scope` without `selected`) is ignored, so a malformed event
+   * can never silently clear the selection.
    */
   'auth:update:selected-scopes': {
     /** The id of the security scheme to update the scopes for */
     id: string[]
     /** The name of the security scheme to update the scopes for */
     name: string
-    /** The scopes to update the selected scopes with */
-    scopes: string[]
-    /** We can add a new scope as well then select it */
-    newScopePayload?: {
-      name: string
-      description: string
-      flowType: keyof OAuthFlowsObject
-    }
+    /** The absolute scope list to store. Used by bulk actions. Mutually exclusive with `scope`. */
+    scopes?: string[]
+    /** The single scope to toggle. Applied against the currently stored scopes. Requires `selected`. */
+    scope?: string
+    /** Whether the toggled `scope` should be selected (added) or deselected (removed). */
+    selected?: boolean
     /** Meta information for the auth update */
     meta: AuthMeta
+  }
+
+  /**
+   * Add a new scope to an OAuth2 flow, or rename / update the description of an existing scope.
+   *
+   * - When `oldScope` is omitted, a new scope is added (no-op if the scope already exists).
+   * - When `oldScope` is provided, the existing scope is replaced. The `scope` key may equal
+   *   `oldScope` for description-only updates.
+   * - When `enable` is true, the resulting `scope` is additionally added to every selection
+   *   requirement (document- and operation-level) that already references this security scheme,
+   *   so callers do not need a follow-up `auth:update:selected-scopes`.
+   *
+   * Renames always rewrite the previous scope key inside matching selections. `enable` is
+   * intended for "add and select" flows where the new scope should be immediately active.
+   */
+  'auth:upsert:scopes': {
+    /** The name of the security scheme that owns the flow */
+    name: string
+    /** Which OAuth flow on the scheme to update */
+    flowType: keyof OAuthFlowsObject
+    /** The desired scope key */
+    scope: string
+    /** Description for the scope */
+    description: string
+    /** When set, the existing scope with this key is replaced (rename + description update) */
+    oldScope?: string
+    /**
+     * When true, ensure the resulting `scope` is included in every selection requirement
+     * (document- and operation-level) that references this security scheme by name.
+     */
+    enable?: boolean
+  }
+
+  /**
+   * Remove a scope from an OAuth2 flow.
+   *
+   * Selection state is owned by `auth:update:selected-scopes`. Callers that want to drop the
+   * removed scope from current selections must emit `auth:update:selected-scopes` separately.
+   */
+  'auth:delete:scopes': {
+    /** The name of the security scheme that owns the flow */
+    name: string
+    /** Which OAuth flow on the scheme to delete the scope from */
+    flowType: keyof OAuthFlowsObject
+    /** The scope key to delete */
+    scope: string
   }
 
   /**

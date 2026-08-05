@@ -45,22 +45,29 @@ const createFakeApp = ({
   activeDocumentName,
   isTeamWorkspace = true,
   teamSlug = 'acme',
-  workspaceList = [
-    { id: 'ws-1', label: 'Acme Workspace', teamSlug: 'acme', slug: 'default' },
-    { id: 'ws-2', label: 'Marketing API', teamSlug: 'acme', slug: 'marketing' },
+  teamUid = 'acme-team-uid',
+  workspaceList: workspaceListArg = [
+    { id: 'ws-1', label: 'Acme Workspace', teamSlug: 'acme', slug: 'default', teamUid },
+    { id: 'ws-2', label: 'Marketing API', teamSlug: 'acme', slug: 'marketing', teamUid },
   ],
 }: {
   documents: Record<string, FakeDocument>
   activeDocumentName?: string
   isTeamWorkspace?: boolean
   teamSlug?: string
+  teamUid?: string
   workspaceList?: Array<{
     id: string
     label: string
     teamSlug: string
     slug: string
+    teamUid?: string
   }>
 }) => {
+  const workspaceList = workspaceListArg.map((workspace) => ({
+    ...workspace,
+    teamUid: workspace.teamUid ?? teamUid,
+  }))
   const store = shallowRef({
     workspace: {
       documents,
@@ -105,6 +112,32 @@ const createFakeApp = ({
           })
         }
       },
+      // Mirrors `resumeOrGetStarted` falling through to get-started when no
+      // persisted tab exists, which is always the case in tests since there
+      // is no IndexedDB available.
+      // biome-ignore lint/suspicious/useAwait: its cool
+      resumeOrGetStarted: async ({
+        workspaceUid,
+        teamUid: targetTeamUid,
+      }: {
+        workspaceUid?: string
+        teamUid?: string
+        teamSlug?: string
+      }) => {
+        const found = workspaceUid
+          ? workspaceList.find((w) => w.id === workspaceUid)
+          : targetTeamUid
+            ? workspaceList.find((w) => w.teamUid === targetTeamUid)
+            : undefined
+        if (found) {
+          mockEventBus.emit('ui:navigate', {
+            page: 'workspace',
+            path: 'get-started',
+            teamSlug: found.teamSlug,
+            workspaceSlug: found.slug,
+          })
+        }
+      },
     },
     activeEntities: {
       documentSlug: ref(activeDocumentName),
@@ -116,7 +149,7 @@ const createFakeApp = ({
     eventBus: mockEventBus,
   } as unknown as AppState
 
-  return { app }
+  return { app, workspaceGroups }
 }
 
 /**
@@ -142,7 +175,7 @@ describe('DocumentBreadcrumb', () => {
     // trigger so the menu button reads as the leading breadcrumb segment.
     // The breadcrumb component is responsible only for the segments to
     // the right of the menu, starting with the workspace picker.
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: { info: { title: 'Pets API', version: '1.0.0' } },
       },
@@ -150,7 +183,7 @@ describe('DocumentBreadcrumb', () => {
       isTeamWorkspace: true,
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
 
     // The workspace label is the first user-visible text in the
     // breadcrumb now, not "Team".
@@ -160,7 +193,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('routes to the get-started page of the workspace selected in the combobox', async () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: { info: { title: 'Pets API', version: '1.0.0' } },
       },
@@ -168,7 +201,7 @@ describe('DocumentBreadcrumb', () => {
       isTeamWorkspace: true,
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
     vi.mocked(mockEventBus.emit).mockClear()
 
     const comboboxes = wrapper.findAllComponents({ name: 'ScalarCombobox' })
@@ -185,11 +218,43 @@ describe('DocumentBreadcrumb', () => {
     })
   })
 
+  it('resumeOrGetStarted test double resolves the team branch by teamUid, matching app-state', async () => {
+    const stableTeamUid = 'team-uid-stable'
+    const renamedTeamSlug = 'renamed-url-slug'
+    const { app } = createFakeApp({
+      documents: { pets: { info: { title: 'Pets API', version: '1.0.0' } } },
+      teamSlug: renamedTeamSlug,
+      teamUid: stableTeamUid,
+      workspaceList: [
+        {
+          id: 'ws-1',
+          label: 'Solo workspace',
+          teamSlug: renamedTeamSlug,
+          slug: 'default',
+          teamUid: stableTeamUid,
+        },
+      ],
+    })
+    vi.mocked(mockEventBus.emit).mockClear()
+
+    await app.workspace.resumeOrGetStarted({
+      teamUid: stableTeamUid,
+      teamSlug: renamedTeamSlug,
+    })
+
+    expect(mockEventBus.emit).toHaveBeenCalledWith('ui:navigate', {
+      page: 'workspace',
+      path: 'get-started',
+      teamSlug: renamedTeamSlug,
+      workspaceSlug: 'default',
+    })
+  })
+
   it('emits `createWorkspace` when the picker `+` affordance is invoked', () => {
     // `activeDocumentName` is left unset so the workspace picker is in
     // its dropdown form (the link form, used while inside a document, has
     // no `+` affordance).
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: { info: { title: 'Pets API', version: '1.0.0' } },
       },
@@ -197,7 +262,7 @@ describe('DocumentBreadcrumb', () => {
       isTeamWorkspace: true,
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
 
     const workspaceCombobox = wrapper.findAllComponents({
       name: 'ScalarCombobox',
@@ -210,7 +275,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('renders only the workspace segment when no document is active on the route', () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: {
           info: { title: 'Pets API', version: '1.0.0' },
@@ -226,7 +291,7 @@ describe('DocumentBreadcrumb', () => {
       activeDocumentName: undefined,
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
 
     expect(wrapper.text()).toContain('Acme Workspace')
     expect(wrapper.text()).not.toContain('Pets API')
@@ -234,7 +299,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('renders workspace + document for local documents without a version picker', () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: {
           info: { title: 'Pets API', version: '1.0.0' },
@@ -243,7 +308,7 @@ describe('DocumentBreadcrumb', () => {
       activeDocumentName: 'pets',
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
 
     expect(wrapper.find('nav').exists()).toBe(true)
     expect(wrapper.text()).toContain('Acme Workspace')
@@ -254,7 +319,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('renders the document title and the active version for a registry-backed document', () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         'pets-v1': {
           info: { title: 'Pets v1', version: '1.0.0' },
@@ -271,6 +336,7 @@ describe('DocumentBreadcrumb', () => {
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         registryDocuments: {
           status: 'success',
           documents: [
@@ -315,12 +381,13 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     const fetchRegistryDocument = vi.fn()
 
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         fetchRegistryDocument,
         registryDocuments: {
           status: 'success',
@@ -365,7 +432,7 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     // The real app state wraps the workspace store behind a `.value` accessor;
     // swap the shallow-ref payload for a full `WorkspaceStore` stub so the
     // loader's existing-document lookup and `addDocument` call both succeed.
@@ -385,6 +452,7 @@ describe('DocumentBreadcrumb', () => {
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         fetchRegistryDocument,
         registryDocuments: {
           status: 'success',
@@ -434,12 +502,13 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     const fetchRegistryDocument = vi.fn()
 
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         fetchRegistryDocument,
         registryDocuments: {
           status: 'success',
@@ -502,11 +571,12 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v2' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v2' })
 
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         registryDocuments: {
           status: 'success',
           documents: [
@@ -553,7 +623,7 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     // Use a workspace-store stub that exposes `getOriginalDocument` so the
     // conflict-check helper has a baseline to diff against.
     app.store.value = {
@@ -569,6 +639,7 @@ describe('DocumentBreadcrumb', () => {
     mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         fetchRegistryDocument,
         registryDocuments: {
           status: 'success',
@@ -597,7 +668,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('hides the version picker (and the create-version affordance) for local documents', () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         pets: {
           info: { title: 'Pets API', version: '1.0.0' },
@@ -606,7 +677,7 @@ describe('DocumentBreadcrumb', () => {
       activeDocumentName: 'pets',
     })
 
-    const wrapper = mount(DocumentBreadcrumb, { props: { app } })
+    const wrapper = mount(DocumentBreadcrumb, { props: { app, workspaceGroups: workspaceGroups.value } })
 
     // While inside a document the workspace picker collapses into a plain
     // link button, and the version picker is registry-only. A local
@@ -617,7 +688,7 @@ describe('DocumentBreadcrumb', () => {
   })
 
   it('renders the version picker with a create-version slot for registry-backed documents', () => {
-    const { app } = createFakeApp({
+    const { app, workspaceGroups } = createFakeApp({
       documents: {
         'pets-v1': {
           info: { title: 'Pets v1', version: '1.0.0' },
@@ -634,6 +705,7 @@ describe('DocumentBreadcrumb', () => {
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         registryDocuments: {
           status: 'success',
           documents: [
@@ -672,7 +744,7 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     const addDocument = vi.fn().mockResolvedValue(true)
     // The helper now branches off the seed via `getEditableDocument`, so
     // expose a stub that returns a deep clone of the requested document.
@@ -694,6 +766,7 @@ describe('DocumentBreadcrumb', () => {
     const wrapper = mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         registryDocuments: {
           status: 'success',
           documents: [
@@ -773,7 +846,7 @@ describe('DocumentBreadcrumb', () => {
       },
     }
 
-    const { app } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
+    const { app, workspaceGroups } = createFakeApp({ documents, activeDocumentName: 'pets-v1' })
     app.store.value = {
       ...createWorkspaceStore(documents, 'pets-v1'),
       getOriginalDocument: vi.fn(),
@@ -784,6 +857,7 @@ describe('DocumentBreadcrumb', () => {
     mount(DocumentBreadcrumb, {
       props: {
         app,
+        workspaceGroups: workspaceGroups.value,
         fetchRegistryDocument,
         registryDocuments: {
           status: 'success',

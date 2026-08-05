@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+
 import InfoLinks from './InfoLinks.vue'
 
 describe('InfoLinks', () => {
@@ -25,12 +26,20 @@ describe('InfoLinks', () => {
     url: 'https://docs.example.com',
   }
 
-  it('renders LinkList wrapper', () => {
+  it('renders LinkList wrapper when a link is present', () => {
+    const wrapper = mount(InfoLinks, {
+      props: { info: mockInfo, externalDocs: mockExternalDocs },
+    })
+
+    expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(true)
+  })
+
+  it('does not render LinkList when there are no links', () => {
     const wrapper = mount(InfoLinks, {
       props: { info: mockInfo },
     })
 
-    expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(false)
   })
 
   it('renders ExternalDocs with externalDocs prop', () => {
@@ -46,14 +55,12 @@ describe('InfoLinks', () => {
     expect(externalDocs.props('value')).toEqual(mockExternalDocs)
   })
 
-  it('renders ExternalDocs without externalDocs prop', () => {
+  it('does not render ExternalDocs without externalDocs prop', () => {
     const wrapper = mount(InfoLinks, {
-      props: { info: mockInfo },
+      props: { info: { ...mockInfo, contact: mockContact } },
     })
 
-    const externalDocs = wrapper.findComponent({ name: 'ExternalDocs' })
-    expect(externalDocs.exists()).toBe(true)
-    expect(externalDocs.props('value')).toBeUndefined()
+    expect(wrapper.findComponent({ name: 'ExternalDocs' }).exists()).toBe(false)
   })
 
   it('renders Contact when info.contact is provided', () => {
@@ -119,6 +126,88 @@ describe('InfoLinks', () => {
     expect(termsOfService.exists()).toBe(false)
   })
 
+  it('renders an InfoLink for each x-scalar-links entry', () => {
+    const wrapper = mount(InfoLinks, {
+      props: {
+        info: {
+          ...mockInfo,
+          'x-scalar-links': [
+            { name: 'Privacy Policy', url: 'https://example.com/privacy' },
+            { name: 'Imprint', url: 'https://example.com/imprint' },
+          ],
+        },
+      },
+    })
+
+    const infoLinks = wrapper.findAllComponents({ name: 'InfoLink' })
+    expect(infoLinks).toHaveLength(2)
+    expect(infoLinks[0]?.props()).toEqual({
+      name: 'Privacy Policy',
+      url: 'https://example.com/privacy',
+    })
+    expect(infoLinks[1]?.props()).toEqual({
+      name: 'Imprint',
+      url: 'https://example.com/imprint',
+    })
+  })
+
+  it('renders LinkList when only x-scalar-links is provided', () => {
+    const wrapper = mount(InfoLinks, {
+      props: {
+        info: {
+          ...mockInfo,
+          'x-scalar-links': [{ name: 'Imprint', url: 'https://example.com/imprint' }],
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(true)
+    expect(wrapper.findAllComponents({ name: 'InfoLink' })).toHaveLength(1)
+  })
+
+  it('ignores a malformed non-array x-scalar-links value', () => {
+    const wrapper = mount(InfoLinks, {
+      props: {
+        // A string instead of an array is invalid and should not render any links.
+        info: { ...mockInfo, 'x-scalar-links': 'https://example.com/privacy' as never },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'InfoLink' })).toHaveLength(0)
+  })
+
+  it('skips x-scalar-links entries without a name or url', () => {
+    const wrapper = mount(InfoLinks, {
+      props: {
+        info: {
+          ...mockInfo,
+          'x-scalar-links': [
+            { name: 'Privacy Policy', url: 'https://example.com/privacy' },
+            // Malformed entries that should be filtered out.
+            { name: 'Missing URL' },
+            'not an object',
+          ] as never,
+        },
+      },
+    })
+
+    const infoLinks = wrapper.findAllComponents({ name: 'InfoLink' })
+    expect(infoLinks).toHaveLength(1)
+    expect(infoLinks[0]?.props()).toEqual({
+      name: 'Privacy Policy',
+      url: 'https://example.com/privacy',
+    })
+  })
+
+  it('does not render any InfoLink when x-scalar-links is absent', () => {
+    const wrapper = mount(InfoLinks, {
+      props: { info: { ...mockInfo, termsOfService: mockTermsOfService } },
+    })
+
+    expect(wrapper.findAllComponents({ name: 'InfoLink' })).toHaveLength(0)
+  })
+
   it('renders all components when all info properties are provided', () => {
     const fullInfo = {
       ...mockInfo,
@@ -141,14 +230,12 @@ describe('InfoLinks', () => {
     expect(wrapper.findComponent({ name: 'TermsOfService' }).exists()).toBe(true)
   })
 
-  it('renders only required components when minimal info is provided', () => {
-    const minimalInfo = {
-      title: 'Minimal API',
-      version: '1.0.0',
-    }
-
+  it('renders only the provided link when minimal info has a single link', () => {
     const wrapper = mount(InfoLinks, {
-      props: { info: minimalInfo },
+      props: {
+        info: { title: 'Minimal API', version: '1.0.0' },
+        externalDocs: mockExternalDocs,
+      },
     })
 
     expect(wrapper.findComponent({ name: 'LinkList' }).exists()).toBe(true)

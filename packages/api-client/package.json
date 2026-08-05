@@ -18,7 +18,7 @@
     "rest",
     "testing"
   ],
-  "version": "3.6.1",
+  "version": "3.14.0",
   "engines": {
     "node": ">=22"
   },
@@ -98,11 +98,6 @@
       "import": "./dist/v2/blocks/operation-block/index.js",
       "types": "./dist/v2/blocks/operation-block/index.d.ts",
       "default": "./dist/v2/blocks/operation-block/index.js"
-    },
-    "./v2/blocks/operation-code-sample": {
-      "import": "./dist/v2/blocks/operation-code-sample/index.js",
-      "types": "./dist/v2/blocks/operation-code-sample/index.d.ts",
-      "default": "./dist/v2/blocks/operation-code-sample/index.js"
     },
     "./v2/blocks/request-block": {
       "import": "./dist/v2/blocks/request-block/index.js",
@@ -209,11 +204,6 @@
       "types": "./dist/v2/blocks/operation-block/index.d.ts",
       "default": "./dist/v2/blocks/operation-block/index.js"
     },
-    "./blocks/operation-code-sample": {
-      "import": "./dist/v2/blocks/operation-code-sample/index.js",
-      "types": "./dist/v2/blocks/operation-code-sample/index.d.ts",
-      "default": "./dist/v2/blocks/operation-code-sample/index.js"
-    },
     "./blocks/request-block": {
       "import": "./dist/v2/blocks/request-block/index.js",
       "types": "./dist/v2/blocks/request-block/index.d.ts",
@@ -289,6 +279,11 @@
       "types": "./dist/v2/features/modal/index.d.ts",
       "default": "./dist/v2/features/modal/index.js"
     },
+    "./modal/map-hidden-clients-config": {
+      "import": "./dist/v2/features/modal/helpers/map-hidden-clients-config.js",
+      "types": "./dist/v2/features/modal/helpers/map-hidden-clients-config.d.ts",
+      "default": "./dist/v2/features/modal/helpers/map-hidden-clients-config.js"
+    },
     "./features/operation": {
       "import": "./dist/v2/features/operation/index.js",
       "types": "./dist/v2/features/operation/index.d.ts",
@@ -312,10 +307,10 @@
   "dependencies": {
     "@headlessui/tailwindcss": "catalog:*",
     "@headlessui/vue": "catalog:*",
+    "@scalar/blocks": "workspace:*",
     "@scalar/components": "workspace:*",
     "@scalar/helpers": "workspace:*",
     "@scalar/icons": "workspace:*",
-    "@scalar/json-magic": "workspace:*",
     "@scalar/oas-utils": "workspace:*",
     "@scalar/openapi-types": "workspace:*",
     "@scalar/sidebar": "workspace:*",
@@ -327,13 +322,12 @@
     "@scalar/use-hooks": "workspace:*",
     "@scalar/use-toasts": "workspace:*",
     "@scalar/workspace-store": "workspace:*",
-    "@types/har-format": "^1.2.16",
     "@vueuse/core": "catalog:*",
     "@vueuse/integrations": "catalog:*",
-    "cookie": "catalog:*",
     "focus-trap": "^7.8.0",
     "fuse.js": "catalog:*",
     "js-base64": "catalog:*",
+    "jsonc-parser": "catalog:*",
     "nanoid": "catalog:*",
     "pretty-ms": "^9.3.0",
     "radix-vue": "catalog:*",

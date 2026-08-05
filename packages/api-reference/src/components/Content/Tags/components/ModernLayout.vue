@@ -5,16 +5,17 @@ import { computed, useId } from 'vue'
 
 import { SectionContainer } from '@/components/Section'
 import ShowMoreButton from '@/components/ShowMoreButton.vue'
+import { useLocalization } from '@/features/localization'
 
 import TagSection from './TagSection.vue'
 
 const { tag, moreThanOneTag } = defineProps<{
   tag: TraversedTag
   moreThanOneTag: boolean
-  isLoading: boolean
   isCollapsed: boolean
   eventBus: WorkspaceEventBus | null
 }>()
+const { translate } = useLocalization()
 
 const headerId = useId()
 
@@ -35,12 +36,13 @@ const hasChildren = computed(() => (tag?.children?.length ?? 0) > 0)
       :eventBus="eventBus"
       :headerId="headerId"
       :isCollapsed="isCollapsed"
-      :isLoading="isLoading"
       :tag="tag" />
     <ShowMoreButton
       v-if="isCollapsed && moreThanOneTag && hasChildren"
       :id="tag.id"
-      :aria-label="`Show all ${tag.title} endpoints`"
+      :aria-label="
+        translate('navigation.showAllEndpoints', { name: tag.title })
+      "
       @click="
         () => eventBus?.emit('toggle:nav-item', { id: tag.id, open: true })
       " />

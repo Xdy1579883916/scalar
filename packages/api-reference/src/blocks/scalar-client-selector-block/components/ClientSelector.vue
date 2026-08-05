@@ -1,48 +1,76 @@
 <script setup lang="ts">
-import { TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/vue'
+import { Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/vue'
 import {
   DEFAULT_CLIENT,
   type ClientOptionGroup,
-} from '@scalar/api-client/blocks/operation-code-sample'
-import { ScalarCodeBlock, ScalarMarkdown } from '@scalar/components'
-import type { AvailableClient } from '@scalar/snippetz'
+} from '@scalar/blocks/code-example'
+import { ScalarIcon } from '@scalar/components/icon'
+import type { TargetId } from '@scalar/types/snippetz'
 import { type WorkspaceEventBus } from '@scalar/workspace-store/events'
-import type { XScalarSdkInstallation } from '@scalar/workspace-store/schemas/extensions/document/x-scalar-sdk-installation'
-import { computed, useId, useTemplateRef } from 'vue'
+import { computed, ref, useId, useTemplateRef, watch } from 'vue'
 
 import {
   getFeaturedClients,
   isFeaturedClient,
 } from '@/blocks/scalar-client-selector-block/helpers/featured-clients'
+import { useLocalization } from '@/features/localization'
 
 import ClientDropdown from './ClientDropdown.vue'
 
 const {
   clientOptions,
-  xScalarSdkInstallation,
   eventBus,
   selectedClient = DEFAULT_CLIENT,
 } = defineProps<{
-  /** Selected SDK installation instructions */
-  xScalarSdkInstallation?: XScalarSdkInstallation['x-scalar-sdk-installation']
   /** Computed list of all available Http Client options */
   clientOptions: ClientOptionGroup[]
-  /** The currently selected Http Client */
-  selectedClient?: AvailableClient
+  /** The currently selected Http Client (a built-in client id or a custom sample id) */
+  selectedClient?: string
   /** Event bus */
   eventBus: WorkspaceEventBus
 }>()
 
 const headingId = useId()
 const morePanel = useId()
+const { translate } = useLocalization()
+
+/**
+ * Whether a selection is a custom code sample (e.g. `custom/python`) rather than
+ * a built-in client. Custom samples are matched by the `custom/` id prefix, which
+ * mirrors the `^custom/` pattern enforced on the stored default client.
+ */
+const isCustomSelection = (client: string | undefined) =>
+  Boolean(client?.startsWith('custom/'))
+
+/**
+ * The generic client this selector actually displays.
+ *
+ * The introduction selector only represents the built-in HTTP clients. Custom
+ * code samples are operation-specific and "always just have the generic
+ * clients", so when one is selected globally we keep showing the last generic
+ * client here instead of switching to (and failing to render) a custom sample.
+ */
+const activeClient = ref(
+  isCustomSelection(selectedClient) ? DEFAULT_CLIENT : selectedClient,
+)
+
+watch(
+  () => selectedClient,
+  (newClient) => {
+    if (!isCustomSelection(newClient)) {
+      activeClient.value = newClient
+    }
+  },
+)
 
 /** Grab the option for the currently selected Http Client */
 const selectedClientOption = computed(
   () =>
     clientOptions.flatMap(
       (optionGroup) =>
-        optionGroup.options.find((option) => option.id === selectedClient) ??
-        [],
+        optionGroup.options.find(
+          (option) => option.id === activeClient.value,
+        ) ?? [],
     )[0],
 )
 
@@ -51,16 +79,17 @@ const featuredClients = computed(() => getFeaturedClients(clientOptions))
 
 /** Currently selected tab index */
 const tabIndex = computed(() =>
-  featuredClients.value.findIndex(
-    (featuredClient) => selectedClient === featuredClient.id,
-  ),
+  featuredClients.value.findIndex((client) => client.id === activeClient.value),
 )
 
 const wrapper = useTemplateRef('wrapper-ref')
 
-/** Emit the selected client event on tab */
-const onTabSelect = (i: number) => {
-  const client = featuredClients.value[i]
+const getIconByLanguageKey = (targetKey: TargetId) =>
+  `programming-language-${targetKey === 'js' ? 'javascript' : targetKey}` as const
+
+/** Handle tab selection */
+const onTabSelect = (index: number) => {
+  const client = featuredClients.value[index]
 
   if (!client || !wrapper.value) {
     return
@@ -68,30 +97,6 @@ const onTabSelect = (i: number) => {
 
   eventBus.emit('workspace:update:selected-client', client.id)
 }
-
-const installationInstructions = computed(() => {
-  // Check whether we have instructions at all
-  if (
-    !Array.isArray(xScalarSdkInstallation) ||
-    !xScalarSdkInstallation?.length
-  ) {
-    return undefined
-  }
-
-  // Find the instructions for the current language
-  const instruction = xScalarSdkInstallation.find((instruction) => {
-    const targetKey = selectedClient?.split('/')[0]?.toLowerCase()
-    return instruction.lang.toLowerCase() === targetKey
-  })
-
-  // Nothing found?
-  if (!instruction) {
-    return undefined
-  }
-
-  // Got it!
-  return instruction
-})
 
 defineExpose({
   selectedClientOption,
@@ -108,49 +113,45 @@ defineExpose({
       <div
         :id="headingId"
         class="client-libraries-heading">
-        Client Libraries
+        {{ translate('clientLibraries.heading') }}
       </div>
 
-      <!-- Tabs -->
-      <TabList
-        :aria-labelledby="headingId"
-        class="client-libraries-list">
+      <!--
+        TabList may only contain Tab children (aria-required-children).
+        The "More" combobox sits beside it in the same visual row.
+      -->
+      <div class="client-libraries-list">
+        <TabList
+          :aria-labelledby="headingId"
+          class="client-libraries-tabs"
+          :style="{ flexGrow: featuredClients.length }">
+          <Tab
+            v-for="featuredClient in featuredClients"
+            :key="featuredClient.clientKey"
+            class="client-libraries rendered-code-sdks"
+            :class="{
+              'client-libraries__active': featuredClient.id === activeClient,
+            }">
+            <div :class="`client-libraries-icon__${featuredClient.targetKey}`">
+              <ScalarIcon
+                class="client-libraries-icon"
+                :icon="getIconByLanguageKey(featuredClient.targetKey)" />
+            </div>
+            <span class="client-libraries-text">{{
+              featuredClient.targetTitle
+            }}</span>
+          </Tab>
+        </TabList>
+
         <ClientDropdown
           :clientOptions
           :eventBus
-          :featuredClients
-          :morePanel
-          :selectedClient />
-      </TabList>
+          :selectedClient="activeClient" />
+      </div>
 
       <!-- Content -->
       <TabPanels>
-        <template
-          v-if="
-            installationInstructions?.source ||
-            installationInstructions?.description
-          ">
-          <div
-            v-if="installationInstructions.description"
-            class="selected-client card-footer -outline-offset-2"
-            :class="installationInstructions.source && 'rounded-b-none'"
-            role="tabpanel"
-            tabindex="0">
-            <ScalarMarkdown :value="installationInstructions.description" />
-          </div>
-          <div
-            v-if="installationInstructions.source"
-            class="selected-client card-footer border-t-0 p-0"
-            role="tabpanel"
-            tabindex="1">
-            <ScalarCodeBlock
-              class="rounded-b-lg *:first:p-3"
-              :content="installationInstructions.source"
-              copy="always"
-              lang="shell" />
-          </div>
-        </template>
-        <template v-else-if="isFeaturedClient(selectedClient)">
+        <template v-if="isFeaturedClient(activeClient)">
           <TabPanel
             v-for="client in featuredClients"
             :key="client.id"
@@ -199,7 +200,100 @@ defineExpose({
   border-top-left-radius: var(--scalar-radius-xl);
   border-top-right-radius: var(--scalar-radius-xl);
 }
-:deep(.scalar-codeblock-pre .hljs) {
-  margin-top: 8px;
+.client-libraries-list {
+  container: client-libraries-list / inline-size;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 12px;
+  background-color: var(--scalar-background-1);
+  border-left: var(--scalar-border-width) solid var(--scalar-border-color);
+  border-right: var(--scalar-border-width) solid var(--scalar-border-color);
+}
+/* Grows once per tab it holds, so tabs and the "More" trigger stay even */
+.client-libraries-tabs {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.client-libraries {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  position: relative;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 8px 2px;
+  gap: 6px;
+  color: var(--scalar-color-3);
+  border-bottom: 1px solid transparent;
+  user-select: none;
+}
+
+.client-libraries:not(.client-libraries__active):hover:before {
+  content: '';
+  position: absolute;
+  width: calc(100% - 4px);
+  height: calc(100% - 4px);
+  background: var(--scalar-background-2);
+  left: 2px;
+  top: 2px;
+  z-index: 0;
+  border-radius: var(--scalar-radius);
+}
+.client-libraries:active {
+  color: var(--scalar-color-1);
+}
+.client-libraries:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--scalar-color-accent);
+}
+/* remove php and c on mobile */
+@media screen and (max-width: 450px) {
+  .client-libraries:nth-of-type(4),
+  .client-libraries:nth-of-type(5) {
+    display: none;
+  }
+}
+.client-libraries-icon {
+  max-width: 14px;
+  max-height: 14px;
+  min-width: 14px;
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+  color: currentColor;
+}
+.client-libraries__active {
+  color: var(--scalar-color-1);
+  border-bottom: 1px solid var(--scalar-color-1);
+}
+.client-libraries .client-libraries-text {
+  font-size: var(--scalar-small);
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.client-libraries__active .client-libraries-text {
+  color: var(--scalar-color-1);
+  font-weight: var(--scalar-semibold);
+}
+@media screen and (max-width: 600px) {
+  .references-classic .client-libraries {
+    flex-direction: column;
+  }
+}
+@container client-libraries-list (width < 380px) {
+  .client-libraries {
+    width: 100%;
+  }
+  .client-libraries span {
+    display: none;
+  }
 }
 </style>

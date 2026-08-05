@@ -1,10 +1,17 @@
 <script lang="ts" setup>
 import type { ApiReferenceConfiguration } from '@scalar/types/api-reference'
 import { type WorkspaceEventBus } from '@scalar/workspace-store/events'
+import { computed } from 'vue'
 
 import Badge from '@/components/Badge/Badge.vue'
+import { useLocalization } from '@/features/localization'
 
-const { eventBus, documentDownloadType, documentUrl } = defineProps<{
+const {
+  eventBus,
+  documentDownloadType,
+  documentUrl,
+  documentType = 'openapi',
+} = defineProps<{
   /** The document download type. */
   documentDownloadType: ApiReferenceConfiguration['documentDownloadType']
   /** The event bus for the handling all events. */
@@ -14,7 +21,16 @@ const { eventBus, documentDownloadType, documentUrl } = defineProps<{
    * so the link can point to the document.
    */
   documentUrl?: string
+  /** The kind of document being rendered. Drives the button label. */
+  documentType?: 'openapi' | 'asyncapi'
 }>()
+const { translate } = useLocalization()
+
+const label = computed(() =>
+  documentType === 'asyncapi'
+    ? translate('download.asyncapi')
+    : translate('download.openapi'),
+)
 
 // The id is retrieved at the layout level.
 const handleDownloadClick = (format: 'json' | 'yaml') => {
@@ -36,7 +52,7 @@ const handleDownloadClick = (format: 'json' | 'yaml') => {
       v-if="documentDownloadType === 'direct' && documentUrl"
       class="download-link download-button"
       :href="documentUrl">
-      <span> Download OpenAPI Document </span>
+      <span>{{ label }}</span>
     </a>
 
     <!-- JSON  -->
@@ -45,7 +61,7 @@ const handleDownloadClick = (format: 'json' | 'yaml') => {
       class="download-button"
       type="button"
       @click.prevent="() => handleDownloadClick('json')">
-      <span> Download OpenAPI Document </span>
+      <span>{{ label }}</span>
       <Badge class="extension hidden group-hover:flex">json</Badge>
     </button>
 
@@ -55,7 +71,7 @@ const handleDownloadClick = (format: 'json' | 'yaml') => {
       class="download-button"
       type="button"
       @click.prevent="() => handleDownloadClick('yaml')">
-      <span> Download OpenAPI Document </span>
+      <span>{{ label }}</span>
       <Badge class="extension hidden group-hover:flex">yaml</Badge>
     </button>
   </div>
@@ -165,7 +181,8 @@ const handleDownloadClick = (format: 'json' | 'yaml') => {
   top: 42px;
 }
 
-.extension {
+/* Scoped to `.badge.extension` so the accent colors override the badge base styles. */
+.badge.extension {
   z-index: 1;
   background: var(--scalar-link-color, var(--scalar-color-accent));
   color: var(--scalar-background-1);

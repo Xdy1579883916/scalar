@@ -13,7 +13,7 @@ import { ServerObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/
 import type { ComponentProps } from '@test/utils/types'
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 vi.mock('@/plugins/hooks/usePluginManager', () => ({
   usePluginManager: () => ({
@@ -25,6 +25,7 @@ vi.mock('@/helpers/lazy-bus', () => ({
   getLazyPlaceholderHeight: () => undefined,
   requestLazyRender: () => undefined,
   setLazyPlaceholderHeight: () => undefined,
+  scrollTargetId: ref(''),
   useLazyBus: () => ({
     isReady: computed(() => true),
   }),
@@ -126,6 +127,7 @@ const makeMockProps = (entries: TraversedEntry[]): ComponentProps<typeof Travers
   entries,
   selectedServer: mockServer,
   selectedClient: mockStore.workspace['x-scalar-default-client'],
+  selectedExample: mockStore.workspace['x-scalar-default-example'],
   expandedItems: {},
   securitySchemes: {},
   eventBus,
@@ -309,6 +311,23 @@ describe('tag group rendering', () => {
     // Tag groups render their children directly without a Tag wrapper
     expect(wrapper.findComponent({ name: 'Operation' }).exists()).toBe(true)
     expect(wrapper.text()).toContain('Get Users')
+  })
+
+  it('exposes the tag group id as a scroll anchor', () => {
+    // Modern layout flattens tag groups, so the group needs its own anchor
+    // element. Without it, selecting the group from search or the sidebar has
+    // nothing to scroll to.
+    const tagGroup = createMockTagGroup({
+      id: 'tag-group/auth',
+      children: [createMockOperation({ id: 'group-op-1', title: 'Get Users', path: '/users', method: 'get' })],
+    })
+    const entries: TraversedEntry[] = [tagGroup]
+
+    const wrapper = mount(TraversedEntryComponent, {
+      props: makeMockProps(entries),
+    })
+
+    expect(wrapper.find('#tag-group\\/auth').exists()).toBe(true)
   })
 
   it('renders empty tag group correctly', () => {

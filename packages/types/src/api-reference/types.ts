@@ -1,5 +1,8 @@
 import type { PartialDeep } from 'type-fest'
 
+import type { AvailableClient, ClientId, TargetId } from '../snippetz'
+import type { PluginAuthState } from './api-reference-plugin'
+
 /** Some common properties used in all security schemes */
 type SecuirtySchemeCommon = {
   /* A description for security scheme. CommonMark syntax MAY be used for rich text representation. */
@@ -199,11 +202,17 @@ export type ViewComponent = {
   component: unknown
   renderer?: unknown
   props?: Record<string, any>
+  sidebar?: {
+    /** Whether to show an entry for this view in the sidebar */
+    show: boolean
+    /** Label to display in the sidebar */
+    label: string
+  }
 }
 
 export type LifecycleHooks = {
-  onInit?: ({ config }: { config: Partial<BaseConfiguration> }) => void
-  onConfigChange?: ({ config }: { config: Partial<BaseConfiguration> }) => void
+  onInit?: ({ config, auth }: { config: Partial<BaseConfiguration>; auth: PluginAuthState }) => void
+  onConfigChange?: ({ config, auth }: { config: Partial<BaseConfiguration>; auth: PluginAuthState }) => void
   onDestroy?: () => void
 }
 
@@ -211,6 +220,7 @@ export type ApiReferencePlugin = () => {
   name: string
   extensions: SpecificationExtension[]
   views?: {
+    'content.start'?: ViewComponent[]
     'content.end'?: ViewComponent[]
   }
   hooks?: LifecycleHooks
@@ -328,21 +338,322 @@ export type BaseConfiguration = {
   externalUrls: ExternalUrls
 }
 
+/** User-facing label for the components.schemas section in the sidebar, content, and search. */
+export type ModelsSectionLabel = 'Models' | 'Schemas' | (string & {})
+
+/** Default label for the components.schemas section. Preserves the historical `Models` wording and the `#models` hash. */
+export const DEFAULT_MODELS_SECTION_LABEL: ModelsSectionLabel = 'Models'
+
+/** Built-in locale identifiers shipped with the API Reference UI. */
+export type ApiReferenceBuiltInLocale = 'en' | 'ru' | 'es' | 'fr' | 'de' | 'zh-CN' | 'ar' | 'pt'
+
+/** Locale identifier used to select built-in translations. */
+export type ApiReferenceLocale = ApiReferenceBuiltInLocale | (string & {})
+
+/** Text direction used by the rendered API Reference. */
+export type ApiReferenceTextDirection = 'ltr' | 'rtl'
+
+/** Text direction configuration. `auto` derives the direction from the locale. */
+export type ApiReferenceTextDirectionPreference = ApiReferenceTextDirection | 'auto'
+
+/** User-facing UI copy for API Reference shell labels. */
+export type ApiReferenceTranslations = {
+  common: {
+    additionalProperties: string
+    const: string
+    deprecated: string
+    description: string
+    discriminator: string
+    enum: string
+    format: string
+    greaterThan: string
+    httpMethod: string
+    keys: string
+    lessThan: string
+    max: string
+    min: string
+    maxLength: string
+    minLength: string
+    multipleOf: string
+    nullable: string
+    path: string
+    pattern: string
+    propertyNames: string
+    readOnly: string
+    required: string
+    hideValues: string
+    showAllValues: string
+    type: string
+    unique: string
+    values: string
+    writeOnly: string
+  }
+  search: {
+    label: string
+    inputLabel: string
+    open: string
+    placeholder: string
+    clear: string
+    keyboardShortcut: string
+    command: string
+    control: string
+    results: string
+    navigate: string
+    select: string
+    instructions: string
+    entryHeading: string
+    entryOperation: string
+    entryTag: string
+    entryTagGroup: string
+    entryWebhook: string
+  }
+  navigation: {
+    introduction: string
+    closeGroup: string
+    closeMenu: string
+    openGroup: string
+    openMenu: string
+    operations: string
+    webhooks: string
+    channels: string
+    endpoints: string
+    showAllEndpoints: string
+    sidebarFor: string
+    mainContent: string
+    collapsed: string
+  }
+  server: {
+    label: string
+    select: string
+  }
+  info: {
+    termsOfService: string
+  }
+  asyncapi: {
+    servers: string
+    protocols: string
+  }
+  clientLibraries: {
+    heading: string
+    more: string
+    selectAll: string
+  }
+  operation: {
+    body: string
+    cookies: string
+    headers: string
+    pathParameters: string
+    queryParameters: string
+    requestBody: string
+    responses: string
+    testRequest: string
+    webhook: string
+    selectedContentType: string
+    hideHeaders: string
+    showHeaders: string
+    callbacks: string
+  }
+  response: {
+    exampleResponses: string
+    noBody: string
+    showSchema: string
+    status: string
+  }
+  schema: {
+    example: string
+    examples: string
+    default: string
+    schema: string
+    emptyObject: string
+    showAdditionalProperties: string
+    childAttributes: string
+    hideChildAttributes: string
+    showChildAttributes: string
+    forName: string
+    showSchemaDetails: string
+    oneOf: string
+    anyOf: string
+    allOf: string
+    not: string
+    unknownType: string
+  }
+  download: {
+    openapi: string
+    asyncapi: string
+  }
+  models: {
+    label: string
+  }
+  actions: {
+    copyLink: string
+    copyLinkTo: string
+    copyToClipboard: string
+    copyEndpointUrl: string
+    showMore: string
+  }
+  agent: {
+    askAi: string
+    askAiAgent: string
+    close: string
+  }
+  mcp: {
+    generate: string
+    connect: string
+  }
+  developerTools: {
+    title: string
+    configure: string
+    share: string
+    deploy: string
+    scalarConfiguration: string
+    theme: string
+    layout: string
+    layoutOptions: string
+    intro: string
+    disableToolbarBefore: string
+    disableToolbarAfter: string
+    localhostOnly: string
+    layoutModern: string
+    layoutClassic: string
+    showSidebar: string
+    defaultOpenFirstTag: string
+    defaultOpenAllTags: string
+    expandAll: string
+    expandAllResponses: string
+    hideClientButton: string
+    hideDarkModeToggle: string
+    hideModels: string
+    hideSearch: string
+    showOperationId: string
+    hideTestRequestButton: string
+    scalarDocs: string
+    deployDescription: string
+    shareTitle: string
+    shareDescription: string
+    uploadDocument: string
+    temporaryLinkExpiration: string
+    deployOnScalar: string
+    deployFree: string
+    additionalFeaturesMightRequire: string
+    generate: string
+    passwordProtection: string
+    customDomains: string
+    freeFormContent: string
+    cdnInfrastructure: string
+    pullFromGitHub: string
+    markdownMdx: string
+    spectralLinting: string
+    jsonSchemaHosting: string
+    askAi: string
+    mcpServers: string
+    unableToExportDocument: string
+    unknownError: string
+  }
+  gettingStarted: {
+    swaggerEditor: string
+    description: string
+    showExample: string
+    uploadFile: string
+    integrations: string
+    theming: string
+    features: string
+    customize: string
+    customizeDescription: string
+    testing: string
+    testingDescription: string
+    search: string
+    searchDescription: string
+    hosting: string
+    hostingDescription: string
+    openApiSwagger: string
+    openApiSwaggerDescription: string
+    codeSamples: string
+    codeSamplesDescription: string
+  }
+  footer: {
+    poweredByScalar: string
+  }
+  authentication: {
+    title: string
+    accepts: string
+    allOf: string
+    authentication: string
+    optional: string
+    oneOf: string
+    required: string
+    requires: string
+    scopes: string
+  }
+}
+
+/**
+ * Recursively flattens a nested translations object into a union of dot-path keys.
+ * For example, `{ search: { label: string } }` becomes `'search.label'`.
+ */
+type TranslationDotPaths<T, Prefix extends string = ''> = {
+  [Key in keyof T & string]: T[Key] extends string
+    ? `${Prefix}${Key}`
+    : T[Key] extends Record<string, unknown>
+      ? TranslationDotPaths<T[Key], `${Prefix}${Key}.`>
+      : never
+}[keyof T & string]
+
+/** Dot-path key into {@link ApiReferenceTranslations} (for example, `search.label` or `schema.oneOf`). */
+export type ApiReferenceTranslationKey = TranslationDotPaths<ApiReferenceTranslations>
+
+/** API Reference localization configuration. */
+export type ApiReferenceLocalization = {
+  /** Locale used for built-in UI translations. */
+  locale?: ApiReferenceLocale
+  /** Text direction. `auto` derives direction from locale. */
+  direction?: ApiReferenceTextDirectionPreference
+  /** Custom UI translations. Values are merged with the built-in locale and English fallback. */
+  translations?: PartialDeep<ApiReferenceTranslations>
+}
+
 type ExtendedConfiguration = {
   /** The layout to use for the references */
   layout: 'modern' | 'classic'
   /** @deprecated Use proxyUrl instead */
   proxy?: string
-  /** Custom fetch function for custom logic. Can be used to add custom headers, handle auth, etc. */
+  /**
+   * Custom fetch function for custom logic. Can be used to add custom headers, handle auth, etc.
+   *
+   * @deprecated Use `customFetch` instead.
+   */
   fetch?: typeof fetch
+  /**
+   * Custom fetch function used both when loading the OpenAPI document and when sending requests from the API client.
+   *
+   * Can be used to add custom headers, attach credentials (for example `credentials: 'include'`), handle auth, etc.
+   */
+  customFetch?: typeof fetch
   /** Plugins for the API reference */
   plugins?: ApiReferencePlugin[]
+  /**
+   * URLs of ESM modules that provide additional plugins for the API reference.
+   *
+   * Each module is loaded with a dynamic `import()` before the API reference mounts, and its
+   * default export is registered as a plugin (the same shape as the `plugins` entries).
+   *
+   * Unlike `plugins`, this option is JSON-serializable, so integrations that pass their
+   * configuration as JSON can load plugins without replacing the whole bundle.
+   *
+   * Note: This is only supported by the standalone browser build (`Scalar.createApiReference`).
+   * When you render the `ApiReference` component yourself, import the plugin and pass it via
+   * `plugins` instead.
+   *
+   * @example ['https://cdn.jsdelivr.net/npm/@example/scalar-plugin/dist/plugin.js']
+   */
+  pluginUrls?: string[]
   /** Allows the user to inject an editor for the spec */
   isEditable: boolean
-  /** Controls whether the references show a loading state in the intro */
-  isLoading: boolean
   /** Whether to show models in the sidebar, search, and content. */
   hideModels: boolean
+  /** Label for the components.schemas section (`Models`, `Schemas`, or any custom string). */
+  modelsSectionLabel?: ModelsSectionLabel
+  /** API Reference UI localization configuration. */
+  localization?: ApiReferenceLocalization
   /** Sets the file type of the document to download, set to `none` to hide the download button */
   documentDownloadType: 'both' | 'yaml' | 'json' | 'direct' | 'none'
   /** @deprecated Use `documentDownloadType: 'none'` instead */
@@ -363,8 +674,16 @@ type ExtendedConfiguration = {
   metaData?: any
   /** Path to a favicon image */
   favicon?: string
-  /** List of httpsnippet clients to hide from the clients menu. By default hides Unirest, pass `[]` to show all clients */
-  hiddenClients?: Record<string, boolean | string[]> | string[] | true
+  /**
+   * List of httpsnippet clients to hide from the clients menu. By default hides Unirest, pass `[]` to show all clients
+   *
+   * An entry can be a target (`'node'`), a client name (`'fetch'`), or a full id (`'node/fetch'`). The record form is
+   * keyed by target, with `true` to hide the whole target or a list of client names to hide within it.
+   */
+  hiddenClients?:
+    | Partial<Record<TargetId, boolean | ClientId<TargetId>[]>>
+    | Array<TargetId | ClientId<TargetId> | AvailableClient>
+    | true
   /** Determine the HTTP client that is selected by default */
   defaultHttpClient?: {
     targetKey: string
@@ -372,8 +691,6 @@ type ExtendedConfiguration = {
   }
   /** Custom CSS to be added to the page */
   customCss?: string
-  /** onSpecUpdate is fired on spec/swagger content change */
-  onSpecUpdate?: (input: string) => void
   /** onServerChange is fired on selected server change */
   onServerChange?: (input: string) => void
   /** onDocumentSelect is fired when the config is selected */
@@ -382,6 +699,10 @@ type ExtendedConfiguration = {
   onLoaded?: (slug: string) => void | Promise<void>
   /** Fired before the outbound request is built; callback receives a mutable request builder. Experimental API. */
   onBeforeRequest?:
+    | ((input: { request: Request; requestBuilder: any; envVariables: Record<string, string> }) => void | Promise<void>)
+    | undefined
+  /** Fired right before the outbound request is sent; callback receives the exact fetch Request that goes over the wire. Experimental API. */
+  onRequestBuilt?:
     | ((input: { request: Request; requestBuilder: any; envVariables: Record<string, string> }) => void | Promise<void>)
     | undefined
   /** onShowMore is fired when the user clicks the "Show more" button on the references */
@@ -411,6 +732,13 @@ type ExtendedConfiguration = {
   generateOperationSlug?: (input: { path: string; operationId?: string; method: string; summary?: string }) => string
   /** Customize the webhook portion of the hash */
   generateWebhookSlug?: (input: { name: string; method?: string }) => string
+  /**
+   * Customize the browser tab title.
+   *
+   * Called whenever the section in view changes — on sidebar clicks, on scroll, and when switching documents.
+   * Receives the title of the section currently in view and the active OpenAPI document.
+   */
+  setPageTitle?: (input: { title: string; document: { title: string; slug: string } }) => string
   /** To handle redirects, pass a function that receives the current path/hash and passes that to history.replaceState */
   redirect?: (input: string) => string | null | undefined
   /** Whether to include default fonts */
@@ -423,6 +751,8 @@ type ExtendedConfiguration = {
   expandAllModelSections: boolean
   /** Whether to expand all responses by default. Warning: this can cause performance issues on big documents */
   expandAllResponses: boolean
+  /** Whether to expand all nested schema properties. Warning: this can cause performance issues on big documents */
+  expandAllSchemaProperties: boolean
   /** Function to sort tags */
   tagsSorter?: 'alpha' | ((a: any, b: any) => number)
   /** Function to sort operations */
@@ -439,9 +769,9 @@ export type SourceConfiguration = {
   url?: string
   /** Directly embed the OpenAPI document. Can be a string, object, function returning an object, or null. It is recommended to pass a URL instead of content. */
   content?: string | null | Record<string, any> | (() => string | any)
-  /** The title of the OpenAPI document. @deprecated Please move `title` to the top level and remove the `spec` prefix. */
+  /** The title of the OpenAPI document. Used for the page title and the document name in the dropdown. With multiple `sources`, set this per source. */
   title?: string
-  /** The slug of the OpenAPI document used in the URL. @deprecated Please move `slug` to the top level and remove the `spec` prefix. */
+  /** The slug of the OpenAPI document used in the URL. If none is passed, the title will be used. With multiple `sources`, set this per source. */
   slug?: string
   /** @deprecated Use `url` and `content` on the top level instead. */
   spec?: {
@@ -479,6 +809,10 @@ export type ApiReferenceConfiguration = ApiReferenceConfigurationRaw & {
    * Fired before the outbound request is built and sent. Mutate the **request builder** so the eventual fetch call
    * reflects your changes (method, path, headers, body, and related fields).
    *
+   * The `request` passed here is **not** the object sent over the wire; the actual request is rebuilt from the builder
+   * afterwards. Use `onRequestBuilt` instead when you need the exact outgoing request (for example, to hash a
+   * `multipart/form-data` body for request signing).
+   *
    * **Experimental:** The builder matches {@link https://github.com/scalar/scalar/blob/main/packages/workspace-store/src/request-example/builder/request-factory.ts RequestFactory}
    * (`import type { RequestFactory } from '@scalar/workspace-store/request-example'`). That shape is still experimental and may change in minor releases.
    *
@@ -496,6 +830,35 @@ export type ApiReferenceConfiguration = ApiReferenceConfigurationRaw & {
    * ```
    */
   onBeforeRequest?: (input: {
+    request: Request
+    requestBuilder: any
+    envVariables: Record<string, string>
+  }) => void | Promise<void> | undefined
+  /**
+   * Fired after the outbound fetch `Request` has been built, right before it is sent. The `request` is the exact
+   * object handed to fetch: mutating its headers modifies the outgoing request, and hashing its body produces a
+   * hash that matches what the server receives (useful for request signing — a rebuilt `multipart/form-data` body
+   * would get a different boundary).
+   *
+   * Use `onBeforeRequest` instead when you need to mutate the request builder (method, path, query, body,
+   * security); those mutations have no effect at this stage because the request is already built.
+   *
+   * **Experimental:** This API may change in minor releases.
+   *
+   * @param input - Hook argument from the integration layer.
+   * @param input.request - The exact fetch API `Request` that will be sent. Mutate its headers to modify the outgoing request.
+   * @param input.requestBuilder - The builder the request was built from, for inspection. Mutating it has no effect at this stage.
+   * @param input.envVariables - Resolved environment variables for the active environment.
+   * @returns void or a promise that resolves when the hook finishes
+   * @example
+   * ```ts
+   * onRequestBuilt: async ({ request }) => {
+   *   const bodyHash = await hash(await request.clone().arrayBuffer())
+   *   request.headers.set('X-Body-Hash', bodyHash)
+   * }
+   * ```
+   */
+  onRequestBuilt?: (input: {
     request: Request
     requestBuilder: any
     envVariables: Record<string, string>

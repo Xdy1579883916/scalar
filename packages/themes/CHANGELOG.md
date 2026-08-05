@@ -1,5 +1,118 @@
 # @scalar/themes
 
+## 0.17.2
+
+### Patch Changes
+
+- [#9737](https://github.com/scalar/scalar/pull/9737): fix: render hairline borders in Firefox on standard-DPI screens
+
+  Firefox rounds the 0.5px `--scalar-border-width` down to zero device pixels on non-retina displays, which makes `shadow-border` outlines invisible. The border width now falls back to 1px in Firefox below retina density, matching what other engines effectively render.
+
+- [#9782](https://github.com/scalar/scalar/pull/9782): Fix the tooltip rendering with a dark background in light mode. The light-mode tooltip tokens were hard-coded to a dark fill with light text, so the tooltip stayed black regardless of the active color mode. They now derive from `--scalar-background-1` and `--scalar-color-1`, so the tooltip follows the theme in both modes.
+
+  The tooltip surface is also polished to match the rest of the system: a standard hairline border and base shadow in both color modes (replacing the dark-mode-only inset border), a large radius, regular font weight, and tighter vertical padding. Horizontal and vertical padding are now separate variables so the placement offset applies to the correct axis.
+
+## 0.17.1
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.17.0
+
+### Minor Changes
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): derive the border radius scale from `--scalar-radius`
+
+  The radius tokens used to be independent, so setting `--scalar-radius: 0` still left rounded corners
+  behind on anything using `--scalar-radius-lg`, `--scalar-radius-xl` or `rounded-full`. They now all
+  derive from `--scalar-radius`, which means overriding that single variable rescales every corner in the
+  interface, and `0` squares it off completely.
+
+  Two new tokens fill out the scale, `--scalar-radius-2xl` (12px) and `--scalar-radius-3xl` (16px), along
+  with `--scalar-radius-full` for pills and circles. The matching `rounded-2xl` and `rounded-3xl` Tailwind
+  utilities now emit CSS; previously they were silently dropped.
+
+  Every default value is unchanged, so nothing shifts unless you were relying on the old behaviour. If
+  your theme sets `--scalar-radius` on its own and expects the larger radii to stay put, set those tokens
+  explicitly. Override `--scalar-radius` on `:root`: a custom property substitutes `var()` at the element
+  where it is declared, so setting the base further down the tree moves it without moving anything derived
+  from it.
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): cap container corners with `--scalar-radius-max`
+
+  A large `--scalar-radius` used to curve tall containers hard enough that they swallowed their own
+  content: dropdown panels clipped their last rows, and code blocks rendered as stadiums.
+
+  Every radius token except `--scalar-radius-full` now clamps to a new `--scalar-radius-max`, which
+  defaults to `20px`. A new `--scalar-radius-md` gives the base radius the same cap, and is what
+  `rounded`, `rounded-md` and form controls now use. Pills and circles are deliberately exempt, so
+  avatars, spinners and toggles stay round.
+
+  The reset no longer sets a `border-radius` on `:focus-visible`. It was reshaping the focused element
+  rather than its outline, which meant a large theme radius turned bare focus containers into pills the
+  moment they were focused. Outlines already follow an element's own corners, so focus rings now match
+  whatever shape the element actually has.
+
+  Defaults are unchanged: every default token sits at or below the cap, so nothing moves unless you were
+  already setting a very large radius.
+
+## 0.16.3
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.16.2
+
+### Patch Changes
+
+- [#9597](https://github.com/scalar/scalar/pull/9597): Add API Reference UI localization configuration with built-in English, Russian, Spanish, French, German, Simplified Chinese and Arabic translations, including automatic RTL direction for Arabic locales.
+
+  Update the shared theme reset so text inputs align to the logical start by default for RTL documents.
+
+  Add a `mergeObjects` deep-merge helper to `@scalar/helpers`, used by the localization layer to merge translation overrides onto the built-in locale.
+
+## 0.16.1
+
+### Patch Changes
+
+- [#9565](https://github.com/scalar/scalar/pull/9565): Apply the themed placeholder color and font to textarea placeholders so they match input placeholders
+
+## 0.16.0
+
+### Minor Changes
+
+- [#9415](https://github.com/scalar/scalar/pull/9415): Ship the Scalar design-system agent skill with the package.
+
+  `@scalar/themes` now bundles the `scalar-design-system` skill (design tokens, theming, a `@scalar/components` reference, and a Paper design-tool bridge) under `skills/`. Agents do not auto-discover skills inside `node_modules`, so link or copy `node_modules/@scalar/themes/skills/scalar-design-system` into your project's `.claude/skills` to use it.
+
+### Patch Changes
+
+- [#9371](https://github.com/scalar/scalar/pull/9371): Use the correct system fonts when withDefaultFonts is set to false
+
+## 0.15.6
+
+### Patch Changes
+
+- [#9268](https://github.com/scalar/scalar/pull/9268): fix button text color variables to use pure white instead of semi-transparent white in dark themes.
+
+## 0.15.5
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(components): add `highlighted` Tailwind variant for Radix menu item highlight state
+
+  Adds a new `highlighted` custom Tailwind variant (matching `[data-highlighted]`) to `@scalar/themes` and uses it in `ScalarDropdownButton` to restore the hover and keyboard-navigation highlight in the workspace and team picker dropdowns.
+
+## 0.15.4
+
+### Patch Changes
+
+- [#9198](https://github.com/scalar/scalar/pull/9198): fix(components): add `highlighted` Tailwind variant for Radix menu item highlight state
+
+  Adds a new `highlighted` custom Tailwind variant (matching `[data-highlighted]`) to `@scalar/themes` and uses it in `ScalarDropdownButton` to restore the hover and keyboard-navigation highlight in the workspace and team picker dropdowns.
+
 ## 0.15.3
 
 ### Patch Changes

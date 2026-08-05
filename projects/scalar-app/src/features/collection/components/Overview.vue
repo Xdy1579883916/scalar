@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { CodeInput } from '@scalar/api-client/components/code-input'
 import { DeleteSidebarListElement } from '@scalar/api-client/components/Sidebar'
-import {
-  ScalarButton,
-  ScalarMarkdown,
-  ScalarModal,
-  ScalarToggle,
-  useModal,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarMarkdown } from '@scalar/components/markdown'
+import { ScalarModal, useModal } from '@scalar/components/modal'
+import { ScalarToggle } from '@scalar/components/toggle'
 import { isHttpMethod } from '@scalar/helpers/http/is-http-method'
 import { ScalarIconPencil } from '@scalar/icons'
+import { getPathItemOperation } from '@scalar/workspace-store/helpers/for-each-path-item-operation'
+import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import {
   computed,
   nextTick,
@@ -46,7 +45,10 @@ const description: ComputedRef<string> = computed(() => {
       return ''
     }
 
-    return document?.paths?.[path]?.[method]?.description ?? ''
+    return (
+      getResolvedRef(getPathItemOperation(document?.paths?.[path], method))
+        ?.description ?? ''
+    )
   }
 
   return document?.info?.description ?? ''
@@ -57,9 +59,9 @@ const deprecated: ComputedRef<boolean> = computed(() => {
     return false
   }
 
-  const operation = document?.paths?.[path]?.[method] as
-    | { deprecated?: boolean }
-    | undefined
+  const operation = getResolvedRef(
+    getPathItemOperation(document?.paths?.[path], method),
+  )
   return operation?.deprecated ?? false
 })
 

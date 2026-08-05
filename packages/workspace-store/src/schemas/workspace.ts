@@ -1,5 +1,6 @@
 import { Type } from '@scalar/typebox'
-import { AVAILABLE_CLIENTS, type AvailableClients } from '@scalar/types/snippetz'
+import type { AsyncApiDocument } from '@scalar/types/asyncapi/3.1'
+import { AVAILABLE_CLIENTS } from '@scalar/types/snippetz'
 
 import { compose } from '@/schemas/compose'
 import { extensions } from '@/schemas/extensions'
@@ -16,16 +17,14 @@ import { type XScalarOrder, XScalarOrderSchema } from '@/schemas/extensions/gene
 import { type XScalarActiveProxy, XScalarActiveProxySchema } from '@/schemas/extensions/workspace/x-scalar-active-proxy'
 import { type XScalarTabs, XScalarTabsSchema } from '@/schemas/extensions/workspace/x-scalar-tabs'
 
-import { OpenAPIDocumentSchema, type OpenAPIExtensions, type OpenApiDocument } from './v3.1/strict/openapi-document'
+import type { OpenAPIExtensions, OpenApiDocument } from './v3.1/strict/openapi-document'
 
 export type WorkspaceDocumentMeta = Omit<
   OpenAPIExtensions,
   'x-original-oas-version' | 'x-scalar-original-source-url' | 'x-scalar-original-document-hash'
 >
 
-// Note: use Type.Intersect to combine schemas here because Type.Compose does not work as expected with Modules
-export const WorkspaceDocumentSchema = OpenAPIDocumentSchema
-export type WorkspaceDocument = OpenApiDocument
+export type WorkspaceDocument = OpenApiDocument | AsyncApiDocument
 
 export const ColorModeSchema = Type.Union([Type.Literal('system'), Type.Literal('light'), Type.Literal('dark')])
 
@@ -33,7 +32,14 @@ export const WorkspaceMetaSchema = Type.Partial(
   compose(
     Type.Object({
       [extensions.workspace.colorMode]: ColorModeSchema,
-      [extensions.workspace.defaultClient]: Type.Union(AVAILABLE_CLIENTS.map((client) => Type.Literal(client))),
+      // A built-in client id (e.g. `js/fetch`) or a custom sample id (e.g. `custom/python`)
+      [extensions.workspace.defaultClient]: Type.Union([
+        ...AVAILABLE_CLIENTS.map((client) => Type.Literal(client)),
+        Type.String({ pattern: '^custom/' }),
+      ]),
+      // The example key (from an operation's `examples` map) selected across the document,
+      // so request and response example pickers stay in sync between operations
+      [extensions.workspace.defaultExample]: Type.String(),
       [extensions.workspace.activeDocument]: Type.String(),
       [extensions.workspace.theme]: Type.String(),
       [extensions.workspace.sidebarWidth]: Type.Number({ default: 288 }),
@@ -46,7 +52,12 @@ export type ColorMode = 'system' | 'light' | 'dark'
 
 export type WorkspaceMeta = {
   [extensions.workspace.colorMode]?: ColorMode
-  [extensions.workspace.defaultClient]?: AvailableClients[number]
+  // A built-in client id (e.g. `js/fetch`) or a custom sample id (e.g. `custom/python`).
+  // Typed as a plain string to avoid tripping TypeScript's "union too complex" limit when
+  // this type flows into a Vue `defineProps`; valid values are enforced at runtime.
+  [extensions.workspace.defaultClient]?: string
+  // The example key shared across the document so example pickers stay in sync between operations
+  [extensions.workspace.defaultExample]?: string
   [extensions.workspace.activeDocument]?: string
   [extensions.workspace.theme]?: string
   [extensions.workspace.sidebarWidth]?: number
@@ -65,16 +76,6 @@ export type WorkspaceExtensions = XScalarEnvironments &
   XScalarOrder &
   XScalarCookies &
   XScalarTabs
-
-export const WorkspaceSchema = compose(
-  WorkspaceMetaSchema,
-  Type.Object({
-    documents: Type.Record(Type.String(), WorkspaceDocumentSchema),
-    /** Active document is possibly undefined if we attempt to lookup with an invalid key */
-    activeDocument: Type.Union([Type.Undefined(), WorkspaceDocumentSchema]),
-  }),
-  WorkspaceExtensionsSchema,
-)
 
 export type Workspace = WorkspaceMeta & {
   documents: Record<string, WorkspaceDocument>

@@ -183,6 +183,168 @@ describe('optimizeValueForDisplay', () => {
     })
   })
 
+  it('unions root and variant properties/required instead of letting a variant overwrite the base (#9657)', () => {
+    // Mirrors the reported issue: an `allOf` factors out shared object properties
+    // next to a `oneOf` whose branches each define their own distinct properties.
+    // The shared base fields must still show up alongside each branch's own
+    // fields, not disappear because the branch happens to declare `properties`.
+    const input: SchemaObject = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        status: { type: 'string' },
+      },
+      required: ['name', 'status'],
+      oneOf: [
+        {
+          type: 'object',
+          properties: { all_sites: { type: 'boolean' } },
+          required: ['all_sites'],
+        },
+        {
+          type: 'object',
+          properties: { site_ids: { type: 'array', items: { type: 'integer' } } },
+          required: ['site_ids'],
+        },
+      ],
+    }
+
+    const result = optimizeValueForDisplay(input)
+
+    expect(result).toEqual({
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            status: { type: 'string' },
+            all_sites: { type: 'boolean' },
+          },
+          required: ['name', 'status', 'all_sites'],
+        },
+        {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            status: { type: 'string' },
+            site_ids: { type: 'array', items: { type: 'integer' } },
+          },
+          required: ['name', 'status', 'site_ids'],
+        },
+      ],
+    })
+  })
+
+  it('unions base and variant properties/required for anyOf branches too (#9657)', () => {
+    // Same regression as the oneOf case, but the composition keyword is anyOf.
+    // Both keywords share the merge path, so the base fields must survive here as well.
+    const input: SchemaObject = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        status: { type: 'string' },
+      },
+      required: ['name', 'status'],
+      anyOf: [
+        {
+          type: 'object',
+          properties: { all_sites: { type: 'boolean' } },
+          required: ['all_sites'],
+        },
+        {
+          type: 'object',
+          properties: { site_ids: { type: 'array', items: { type: 'integer' } } },
+          required: ['site_ids'],
+        },
+      ],
+    }
+
+    const result = optimizeValueForDisplay(input)
+
+    expect(result).toEqual({
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            status: { type: 'string' },
+            all_sites: { type: 'boolean' },
+          },
+          required: ['name', 'status', 'all_sites'],
+        },
+        {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            status: { type: 'string' },
+            site_ids: { type: 'array', items: { type: 'integer' } },
+          },
+          required: ['name', 'status', 'site_ids'],
+        },
+      ],
+    })
+  })
+
+  it('unions a sibling allOf base with each variant instead of overwriting it (#9657)', () => {
+    // The exact shape from the issue: the shared fields live in a single-item
+    // `allOf` base inside every branch (not at the root). Flattening that base
+    // must combine its properties/required with the branch's own, not clobber
+    // the branch fields with the base ones.
+    const input = {
+      oneOf: [
+        {
+          type: 'object',
+          properties: { all_sites: { type: 'boolean' } },
+          required: ['all_sites'],
+          allOf: [
+            {
+              type: 'object',
+              properties: { name: { type: 'string' }, status: { type: 'string' } },
+              required: ['name', 'status'],
+            },
+          ],
+        },
+        {
+          type: 'object',
+          properties: { site_ids: { type: 'array', items: { type: 'integer' } } },
+          required: ['site_ids'],
+          allOf: [
+            {
+              type: 'object',
+              properties: { name: { type: 'string' }, status: { type: 'string' } },
+              required: ['name', 'status'],
+            },
+          ],
+        },
+      ],
+    } as unknown as SchemaObject
+
+    const result = optimizeValueForDisplay(input)
+
+    expect(result).toEqual({
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            all_sites: { type: 'boolean' },
+            name: { type: 'string' },
+            status: { type: 'string' },
+          },
+          required: ['all_sites', 'name', 'status'],
+        },
+        {
+          type: 'object',
+          properties: {
+            site_ids: { type: 'array', items: { type: 'integer' } },
+            name: { type: 'string' },
+            status: { type: 'string' },
+          },
+          required: ['site_ids', 'name', 'status'],
+        },
+      ],
+    })
+  })
+
   it('should merge root properties into oneOf schemas when they contain allOf', () => {
     const input = {
       type: 'object',
@@ -386,6 +548,90 @@ describe('optimizeValueForDisplay', () => {
           ],
         },
       ],
+    })
+  })
+
+  it('unions sibling properties with a single-member allOf instead of dropping them', () => {
+    // Mirrors the reported schema: an object declares its own `properties`
+    // next to an `allOf` holding a single `$ref` base. The sibling properties
+    // (`assetIds`) must survive the flattening, and the root's own annotations
+    // (title, description) must win over the base schema's.
+    const input = {
+      title: 'Geofence Update Payload',
+      description: 'Geofence data to update in Equipment Monitoring table.',
+      type: 'object',
+      properties: {
+        assetIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Geofence assigned asset ids',
+        },
+      },
+      allOf: [
+        {
+          '$ref': '#/components/schemas/GeofencePayloadWithoutAssetIds',
+          '$ref-value': {
+            title: 'Geofence Payload without asset ids',
+            description: 'Geofence data to save in Equipment Monitoring table',
+            type: 'object',
+            properties: {
+              updatedBy: { type: 'string' },
+              name: { type: 'string' },
+            },
+            required: ['updatedBy'],
+          },
+        },
+      ],
+    } as unknown as SchemaObject
+
+    const result = optimizeValueForDisplay(input)
+
+    expect(result).toEqual({
+      // The resolved node keeps its `$ref` so model names still render
+      '$ref': '#/components/schemas/GeofencePayloadWithoutAssetIds',
+      title: 'Geofence Update Payload',
+      description: 'Geofence data to update in Equipment Monitoring table.',
+      type: 'object',
+      properties: {
+        assetIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Geofence assigned asset ids',
+        },
+        updatedBy: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['updatedBy'],
+    })
+  })
+
+  it('lets a sibling property redefinition win over the single-member allOf base', () => {
+    // When the root redeclares a property the base also defines, the root's
+    // definition is the more specific one and should be the one rendered.
+    const input = {
+      type: 'object',
+      properties: {
+        updatedBy: { type: 'string', description: 'Name of the updating user' },
+      },
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            updatedBy: { type: 'string' },
+            name: { type: 'string' },
+          },
+        },
+      ],
+    } as unknown as SchemaObject
+
+    const result = optimizeValueForDisplay(input)
+
+    expect(result).toEqual({
+      type: 'object',
+      properties: {
+        updatedBy: { type: 'string', description: 'Name of the updating user' },
+        name: { type: 'string' },
+      },
     })
   })
 })

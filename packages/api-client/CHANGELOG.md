@@ -1,5 +1,386 @@
 # @scalar/api-client
 
+## 3.14.0
+
+### Minor Changes
+
+- [#9709](https://github.com/scalar/scalar/pull/9709): Add an OAuth2 token-acquisition shortcut to HTTP bearer schemes, so a bearer
+  token can be obtained through an OAuth2 flow without switching auth methods.
+  - The bearer scheme's form gains an inline **Authorize via OAuth2** shortcut
+    (and, for authorization-code, **Refresh**) that runs the flow and writes the
+    resulting access token onto the bearer scheme — so the panel never switches
+    to oauth2 and the request sends `Authorization: Bearer`. A gear opens the
+    oauth2 configuration in a modal (`OAuth2.hideActions`).
+  - A new `getOauth2AcquisitionTarget` helper finds the oauth2 flow the shortcut
+    uses, preferring the authorization-code grant (which can refresh) over
+    implicit. Every defined security scheme, oauth2 included, stays selectable in
+    the auth dropdown — the shortcut is purely additive.
+  - `runOAuth2Authorize` + `storeOAuth2Tokens` route the access token to the
+    bearer scheme and the refresh token to the oauth2 scheme.
+
+- [#9726](https://github.com/scalar/scalar/pull/9726): feat: add a switchable form view for JSON and YAML request bodies
+
+  When a request body's content type is JSON or YAML and its schema (or the current example) describes an object, a "Form / Raw" toggle now appears next to the content type selector. The form view renders one row per schema property — with enum dropdowns, required badges, defaults, and per-field validation, matching the existing `multipart/form-data` editor — and folds edits back into a nested object using the schema's declared types (numbers, booleans, arrays, and nested objects survive the round-trip instead of becoming strings). The raw code editor remains the default and is unaffected for non-object bodies or unparseable text.
+
+  `@scalar/workspace-store` gains reusable exports for this: `buildDottedNestedRowPredicate`, `coerceLeafValueToSchemaType`, `coerceUntypedValue`, and `resolveLeafSchema` from `@scalar/workspace-store/request-example`, factored out of the existing multipart request-body builder.
+
+### Patch Changes
+
+- [#9697](https://github.com/scalar/scalar/pull/9697): Add credential input UIs for the AsyncAPI broker-specific security scheme types, which previously showed a "not supported yet" message in the Authentication selector. The SASL-style schemes (`userPassword`, `plain`, `scramSha256`, `scramSha512`) get a username + password form like HTTP basic, `X509` gets client certificate + private key (PEM) inputs, `symmetricEncryption`/`asymmetricEncryption` get a single key input, and `gssapi` gets a service name input. The entered credentials are persisted in the auth store with new type-specific secret shapes (`x-scalar-secret-client-certificate`, `x-scalar-secret-private-key`, `x-scalar-secret-service-name`, plus the existing username/password/token extensions) and round-trip through the merged scheme objects the same way as the OpenAPI types. The Galaxy AsyncAPI sample document now defines one scheme of each broker group so the inputs can be exercised.
+- [#9723](https://github.com/scalar/scalar/pull/9723): Fix missing accessible names on request/scopes table checkboxes and their row delete buttons. `DataTableCheckbox` now accepts an `ariaLabel` prop, and `RequestTableRow`/`OAuthScopesInput` pass row-specific labels (e.g. "Include x-api-key in request", "Select read:users scope") so screen reader users can tell which row a control acts on.
+- [#9595](https://github.com/scalar/scalar/pull/9595): Clicking an OAuth2 scope checkbox no longer toggles the scope twice. The click no longer bubbles to the surrounding row, which had its own toggle handler.
+- [#9594](https://github.com/scalar/scalar/pull/9594): Fix OAuth2 scope checkboxes losing selections on quick clicks. Each scope is now toggled against the stored selection instead of a list computed in the component, so the "Scopes Selected" counter and the scopes sent to the token endpoint stay in sync with the checkboxes.
+- [#9773](https://github.com/scalar/scalar/pull/9773): Allow using a client secret together with PKCE in the OAuth authorization code flow, so confidential clients can use both (as recommended by RFC 9700).
+
+## 3.13.7
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 3.13.6
+
+### Patch Changes
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): derive the border radius scale from `--scalar-radius`
+
+  The radius tokens used to be independent, so setting `--scalar-radius: 0` still left rounded corners
+  behind on anything using `--scalar-radius-lg`, `--scalar-radius-xl` or `rounded-full`. They now all
+  derive from `--scalar-radius`, which means overriding that single variable rescales every corner in the
+  interface, and `0` squares it off completely.
+
+  Two new tokens fill out the scale, `--scalar-radius-2xl` (12px) and `--scalar-radius-3xl` (16px), along
+  with `--scalar-radius-full` for pills and circles. The matching `rounded-2xl` and `rounded-3xl` Tailwind
+  utilities now emit CSS; previously they were silently dropped.
+
+  Every default value is unchanged, so nothing shifts unless you were relying on the old behaviour. If
+  your theme sets `--scalar-radius` on its own and expects the larger radii to stay put, set those tokens
+  explicitly. Override `--scalar-radius` on `:root`: a custom property substitutes `var()` at the element
+  where it is declared, so setting the base further down the tree moves it without moving anything derived
+  from it.
+
+## 3.13.5
+
+## 3.13.4
+
+### Patch Changes
+
+- [#9618](https://github.com/scalar/scalar/pull/9618): Name the actual document type in the "security scheme is missing a type" warning. When a scheme has no recognizable type, the auth selector previously always told users to check their "OpenAPI document", even for AsyncAPI documents. The warning now reflects the document it belongs to (e.g. "AsyncAPI") via a new optional `documentType` prop on the auth selector block, defaulting to `openapi`. Schemes that carry a valid but unsupported type (such as AsyncAPI broker types like `userPassword` or `scramSha256`) now show a dedicated "not supported yet" message naming the type, instead of the misleading "missing a type" warning.
+
+## 3.13.3
+
+### Patch Changes
+
+- [#9671](https://github.com/scalar/scalar/pull/9671): Add a `canDeleteSchemes` prop to the auth selector so the delete (trash) affordance can be hidden. It defaults to `true` (unchanged for the API client, where schemes are editable) and the API reference now passes `false`, since its schemes come from the rendered document and cannot be removed there.
+- [#9670](https://github.com/scalar/scalar/pull/9670): Persist cookies set by a response into the document cookie jar so values like a Django CSRF token survive a page reload and are replayed on later requests
+
+## 3.13.2
+
+## 3.13.1
+
+## 3.13.0
+
+### Minor Changes
+
+- [#9613](https://github.com/scalar/scalar/pull/9613): feat(api-client): support an injectable OAuth2 redirect capture for interactive flows
+
+  Adds an optional `captureOAuth2Callback` option so environments that cannot use browser-popup polling (notably the Electron desktop app, where the renderer runs on `file://`) can run the authorization-code and implicit flows through the system browser and a host-owned redirect target. The desktop app uses this to capture the redirect on a `127.0.0.1` loopback server (RFC 8252).
+
+### Patch Changes
+
+- [#9592](https://github.com/scalar/scalar/pull/9592): fix: only offer the security schemes an operation actually declares
+
+  The auth dropdown no longer lists every scheme from `components.securitySchemes`. In the reference docs and the request modal it now respects the operation's `security`: an operation with `security: []` offers no auth, and an operation that lists a subset of schemes only offers those. The standalone client keeps letting you attach any defined scheme.
+
+## 3.12.0
+
+### Minor Changes
+
+- [#8519](https://github.com/scalar/scalar/pull/8519): refactor: extract the code example block into `@scalar/blocks/code-example`. `api-client`, `api-client-react`, and `api-reference` now import `CodeExample`, `findClient`, `generateClientOptions`, and the related helpers from the new package. `workspace-store` exports `isParamDisabled` with an optional `defaultDisabled` argument.
+
+  **Breaking (`@scalar/api-client`):** the `@scalar/api-client/blocks/operation-code-sample` and `@scalar/api-client/v2/blocks/operation-code-sample` export paths have been removed. Import from `@scalar/blocks/code-example` instead, and use the renamed `CodeExample` / `CodeExampleProps` (previously `OperationCodeSample` / `OperationCodeSampleProps`).
+
+### Patch Changes
+
+- [#9584](https://github.com/scalar/scalar/pull/9584): Show the trailing-bracket name (`filter[ids][]`) on expanded `deepObject` array parameter rows so the table matches the serialized request, and keep edited array leaves as arrays when writing the value back
+- [#9548](https://github.com/scalar/scalar/pull/9548): Keep request and response example pickers in sync across operations. Selecting an example (e.g. "Use case 1") now selects the example with the same key on every other operation that defines it, mirroring how the programming-language selection already syncs. Operations that do not have a matching example keep their current selection.
+
+## 3.11.0
+
+### Minor Changes
+
+- [#9515](https://github.com/scalar/scalar/pull/9515): feat: add `requestBuilt` client plugin hook and `onRequestBuilt` configuration callback that receive the exact fetch `Request` that is sent over the wire
+
+  The hook runs after the request has been built, right before it is sent. Header mutations apply to the outgoing request and the body bytes match what the server receives, which makes request signing possible: hashing the body of a rebuilt `multipart/form-data` request would produce a different multipart boundary than the request that is actually sent.
+
+### Patch Changes
+
+- [#9558](https://github.com/scalar/scalar/pull/9558): Fix the request runner dropping a manually typed auth token when the document name is not slug-safe (e.g. documents loaded via `sources`). The modal now reads auth secrets under the same document key they are written to.
+- [#9497](https://github.com/scalar/scalar/pull/9497): Fix renaming an auto-expanded query parameter row: the committed key is applied to the request and persists in the table without writing partial in-progress edits, and the original key no longer reappears as an empty suggestion
+
+## 3.10.4
+
+### Patch Changes
+
+- [#9319](https://github.com/scalar/scalar/pull/9319): feat: route OAuth2 token exchange/refresh and OpenID Connect discovery through the configured `customFetch`
+
+  The auth selector now forwards the client's `customFetch` to the OAuth2 and OpenID Connect flows. This lets the Electron desktop app pipe these requests over IPC (like regular API requests) instead of the renderer's network stack, so the desktop Content Security Policy can lock down `connect-src`. When no `customFetch` is provided the flows fall back to the global `fetch`, so web behavior is unchanged.
+
+- [#9138](https://github.com/scalar/scalar/pull/9138): feat(api-client): add CodeInputLite, a lightweight contenteditable variable input that replaces CodeMirror in the request, auth, and environment tables for better performance
+
+## 3.10.3
+
+### Patch Changes
+
+- [#9482](https://github.com/scalar/scalar/pull/9482): Fix the auth scheme dropdown not opening when multiple client apps are on the page (for example, the API reference modal). Each modal app now gets a unique id prefix, so teleport targets no longer collide and the popover renders in the visible app instead of a hidden one
+- [#9342](https://github.com/scalar/scalar/pull/9342): fix: resolve operations when OpenAPI path items use `$ref`
+
+  Path entries and webhooks can reference `components.pathItems` instead of inlining operations. Navigation, mutators, search, and markdown export now resolve path-item references before reading HTTP methods and path-level parameters.
+
+- [#9498](https://github.com/scalar/scalar/pull/9498): Sync the SDK installation tabs with the operation code examples: picking a language under "Client Libraries" now switches every operation's code sample to that language's custom example
+
+## 3.10.2
+
+## 3.10.1
+
+### Patch Changes
+
+- [#9449](https://github.com/scalar/scalar/pull/9449): Replace the CommonJS-only `cookie` dependency with an in-repo ESM `serializeCookie` helper
+
+## 3.10.0
+
+### Minor Changes
+
+- [#9398](https://github.com/scalar/scalar/pull/9398): feat: read code samples from x-readme, x-stainless and x-scalar extensions
+
+  In addition to `x-codeSamples`, the code sample picker now reads custom samples from `x-scalar-examples`, `x-stainless-snippets`, `x-stainless-examples`, and `x-readme.code-samples`. When more than one is present on an operation, the highest-priority source is used (x-scalar-examples > x-stainless-snippets > x-stainless-examples > x-readme > x-codeSamples).
+
+### Patch Changes
+
+- [#9438](https://github.com/scalar/scalar/pull/9438): feat(api-reference): add an AsyncAPI server selector
+
+  Adds a server selector for AsyncAPI documents in the API reference introduction. It mirrors the OpenAPI server selector but works with the AsyncAPI server shape (a named map of `host`/`protocol`/`pathname`), labelling each server with its constructed connection URL.
+
+  Server selection and variable changes are now persisted to the workspace store via new `asyncapi-server:update:selected` and `asyncapi-server:update:variables` events and their mutators, mirroring the OpenAPI wiring.
+
+- [#9404](https://github.com/scalar/scalar/pull/9404): Send `multipart/form-data` and `application/x-www-form-urlencoded` object properties using their OpenAPI encoding `style`/`explode` (for example `style: deepObject` produces `address[city]=...` bracket notation) instead of always JSON-stringifying them. The request sent over the wire now matches the generated code snippet.
+- [#9408](https://github.com/scalar/scalar/pull/9408): Render the client library name as a plain label instead of a dropdown when only a single client is available
+
+## 3.9.0
+
+### Minor Changes
+
+- [#9341](https://github.com/scalar/scalar/pull/9341): feat: add WebSocket session transport and plugin hooks for AsyncAPI
+
+  Add WebSocketSession with connect, send, and close helpers, plus connectWebSocket orchestration using Result-based errors. Extend ClientPlugin with optional webSocketHooks (beforeConnect, onWebSocketMessage, onWebSocketClose).
+
+### Patch Changes
+
+- [#9310](https://github.com/scalar/scalar/pull/9310): Add an ESM standalone build (`dist/browser/standalone.esm.js`) alongside the existing UMD bundle. The new bundle works as a side-effect script (registers `window.Scalar.createApiReference` and reads `data-*` configuration) and exports `createApiReference` for direct ESM consumers. It is fully minified through Rolldown's native minifier and uses code splitting so heavy features load asynchronously after first paint:
+  - The API client modal (request editor, response viewer, CodeMirror) is now `await import`'d inside `onMounted` instead of statically imported, moving ~265 KB into a `chunks/modal-*.js` chunk that loads in the background.
+  - The Agent Scalar chat interface (already wrapped in `defineAsyncComponent`) becomes a real `chunks/AgentScalarChatInterface-*.js` chunk (~200 KB), loaded only when the agent is enabled.
+  - The 84 per-icon dynamic imports from `@scalar/icons/library` are coalesced into a single `chunks/icons-*.js`.
+
+  Net effect: initial sync load drops from ~3.32 MB (UMD) to ~2.73 MB (ESM) — a ~570 KB improvement — while total bundle size shrinks by ~140 KB.
+
+  Also adds an `@scalar/api-client/modal/map-hidden-clients-config` deep export so consumers that only need the lightweight client-list helper don't pull the full modal barrel into their static graph.
+
+- [#9323](https://github.com/scalar/scalar/pull/9323): Fixed `x-codeSamples` entries that share a `lang`: multiple code samples with the same language but different labels (e.g. separate sync and async examples) were all marked selected and showed the same snippet. Each sample is now keyed by its position, so every one stays individually selectable.
+- [#9338](https://github.com/scalar/scalar/pull/9338): perf: warm up the request scripts sandbox on mount when scripts are present, so the first request no longer pays the sandbox cold-start cost
+
+## 3.8.5
+
+### Patch Changes
+
+- [#9334](https://github.com/scalar/scalar/pull/9334): Add analytics events for document save and registry sync (pull/push) actions
+
+## 3.8.4
+
+## 3.8.3
+
+### Patch Changes
+
+- [#9145](https://github.com/scalar/scalar/pull/9145): fix(api-client): ignore `encoding.contentType` on `application/x-www-form-urlencoded` request bodies
+
+  Per OAS 3.1.x Encoding Object, `contentType` SHALL be ignored when the request body media type is not a multipart. After the recent change that lifted the multipart gate on `encoding.style`/`explode`/`allowReserved`, the `encoding` map started being passed for urlencoded bodies too. As a side effect, a urlencoded encoding entry that only set `contentType` would JSON-stringify object values into a single part instead of keeping the spec-default dotted-key flattening. Suppress `contentType` for non-multipart bodies so the flattening branch is restored.
+
+- [#9145](https://github.com/scalar/scalar/pull/9145): fix(api-client): encode nested object properties in multipart/form-data as a single JSON part instead of flattening them with dotted keys
+- [#9145](https://github.com/scalar/scalar/pull/9145): fix(api-client): serialize `multipart/form-data` and `application/x-www-form-urlencoded` parts with form / spaceDelimited / pipeDelimited / deepObject styles per RFC6570 when `encoding.style` / `explode` / `allowReserved` is set, matching how query parameters are already serialized. Replaces the dotted-key flattening previously emitted for `style: form, explode: true`.
+- [#9145](https://github.com/scalar/scalar/pull/9145): fix(api-client): JSON-stringify nested object/array values under `style: form` instead of emitting `[object Object]` in `multipart/form-data` and `application/x-www-form-urlencoded` bodies. RFC 6570 form-style serialization only addresses one level of nesting and OpenAPI 3.1 leaves deeper structures undefined; readable JSON is more useful than `String(value)` garble. The documented escape hatch for cleaner output remains `style: deepObject` with `explode: true`.
+- [#9155](https://github.com/scalar/scalar/pull/9155): feat(api-client): expand nested object properties of multipart form-data schemas into individual editable rows (e.g. `props.name`, `props.description`); the wire still sends one `application/json` multipart part per top-level object property — both for the initial schema-derived example and for edited form rows
+- [#9248](https://github.com/scalar/scalar/pull/9248): feat: open the API client on the selected operation when launching from API Reference. The modal "Open API Client" link now includes `operation_path` and `operation_method` query params; scalar-app reads them after import and navigates to that request. Also fixes address bar blur replay when focus moves programmatically on first navigation into a draft operation.
+- [#9259](https://github.com/scalar/scalar/pull/9259): fix(api-client): harden response body preview against XSS and referrer leakage
+
+  The response body preview now validates `src` against an allow-list of safe
+  protocols (`blob:`, `http:`, `https:`, and `data:` URIs limited to known media
+  types) before rendering, replaces the `<object>` fallback with a fully
+  sandboxed `<iframe>` (`sandbox=""`), and sets `referrerpolicy="no-referrer"`
+  on all media elements so untrusted response URLs cannot execute script in the
+  app origin or leak the user's location to third-party hosts.
+
+## 3.8.2
+
+### Patch Changes
+
+- [#9236](https://github.com/scalar/scalar/pull/9236): fix: some analytics events not firing
+
+## 3.8.1
+
+### Patch Changes
+
+- [#9216](https://github.com/scalar/scalar/pull/9216): chore: bumping release
+- [#9218](https://github.com/scalar/scalar/pull/9218): chore: bump
+
+## 3.8.0
+
+### Minor Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: let the command palette pick a registry document version
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add Cmd/Ctrl+S for `ui:save:local-document` so hosts (e.g. scalar-app) can match the header Save control for local workspaces
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: OAuth scope CRUD UI
+  - **Scope definitions vs selection**: adding, editing, or removing a scope on the OAuth flow now goes through dedicated workspace events `auth:upsert:scopes` and `auth:delete:scopes`, plumbed from `OAuth2` → `RequestAuthTab` → `RequestAuthDataTable` and registered in `initializeWorkspaceEventHandlers`. Updating checked scopes remains `auth:update:selected-scopes` without `newScopePayload`.
+  - **OAuthScopesInput**: row hover actions to edit or delete a scope; one shared add/edit modal; when the flow defines no scopes, the summary shows **No Scopes Defined**, **Select All** / **Deselect All** and the expand chevron are hidden, the disclosure summary is disabled, and **Add Scope** stays outside so it remains clickable; the `–` before a description is omitted when the description is empty or missing.
+  - **OAuthScopesAddModal**: supports edit mode (`scope` prop), inline errors for missing name and duplicate names (replacing toast-only validation), trims submitted names, and tests clean up teleported modal DOM between runs.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: some polish for the scalar-app
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: format raw JSON responses with jsonc-parser
+
+  Raw JSON response bodies in the API client are now formatted with `jsonc-parser` instead of `@scalar/helpers` `prettyPrintJson`. The previous path parsed with `JSON.parse` and re-stringified with `JSON.stringify`, which coerces every JSON number to a JavaScript `Number` and loses precision for integers beyond `Number.MAX_SAFE_INTEGER` (a common pain point for 64-bit IDs and other large values). `jsonc-parser` formats the document as text, so numeric literals stay identical to the response on the wire while indentation and line breaks are still normalized. JSON with Comments (JSONC) tokens also remain valid alongside CodeMirror’s JSON mode.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): Remove unwanted scrollbar beside auth scope checkboxes
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: share executable URL build for copy and buildRequest
+
+  Copy URL from the operation address bar now matches the URL that is actually sent: path parameters, operation query string, environment substitution, and security schemes that use in: query are all applied the same way as Send.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: handle registry document and version deletion in document settings
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: prevent address bar from stretching past max width
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add more analytics events
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add Preview/Raw tabs for JSON responses with true raw body view
+
+  JSON bodies now open on a formatted Preview tab (JSONC pretty-print without JSON.parse round-trip). The Raw tab shows the exact decoded response text. Other media types are unchanged; HTML, images, and other previews already used the same toggle pattern.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: padding on addressbar with no servers
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: history bug on operation switch
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): narrow request table parameter info popover width
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): expand object query parameters in the request UI
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: optimize layout for mobile
+  - Hide the document breadcrumb on small screens and surface workspace
+    switching from the menu instead, so the top bar stays uncluttered.
+  - Convert the document save / discard / pull / push / publish buttons to
+    header-button styling and only render the trailing divider when there
+    are actual cluster buttons next to it.
+  - Stack the address bar onto two rows on small screens so the URL and
+    the action cluster (copy / history / send) each get a full row.
+  - Hide the "Log in" affordance from the small-screen top bar (the menu
+    still owns it) and keep only the primary "Register" CTA there.
+  - Give the pre-request and post-response script editors proper vertical
+    padding so the help text no longer clips when it wraps.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): hide OAuth2 client secret when PKCE is enabled and omit it from token requests
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: posthog stream warning
+- [#9211](https://github.com/scalar/scalar/pull/9211): refactor: remove the main import file since it was empty
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): request body content types — OpenAPI extras, MIME labels, and "Other" without auto Content-Type
+
+  The request body dropdown lists built-in types first, then any additional media types from the OpenAPI operation. Labels use the MIME essence (no `charset` in the label). The **Other** option is available again for a raw body: it does **not** add an automatic `Content-Type` header (users can set one manually). Code snippets avoid injecting `Content-Type: other`.
+
+  `getDefaultHeaders` and `filterDisabledDefaultHeaders` are exported from `@scalar/workspace-store/request-example`; the API client uses them for code snippets instead of a duplicate helper.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix invalid Tailwind gap utility in the address bar
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: prevent stuck response overlay after overlapping sends
+
+  Fixes a case where the response loading overlay could stay visible indefinitely and **Cancel** had no effect after opening an example and sending a request very quickly (or when multiple sends overlapped).
+  The reason for that is that `ResponseLoadingOverlay` delays showing the spinner by 1s. Each `hooks:on:request:sent` scheduled a new `setTimeout` without clearing the previous one. Overlapping `sent` events could leave an orphaned timer that still called `loader.start()` after the request had already finished and `hooks:on:request:complete` had run—so the overlay turned on with no further `complete`, and **Cancel** targeted an `AbortController` that no longer matched the finished request.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): build: switch Monaco Vite plugin to ESM and align workers
+- [#9211](https://github.com/scalar/scalar/pull/9211): chore: move app files from client to scalar-app
+
+## 3.7.0
+
+### Minor Changes
+
+- [#9018](https://github.com/scalar/scalar/pull/9018): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+- [#9089](https://github.com/scalar/scalar/pull/9089): feat: let the command palette pick a registry document version
+
+### Patch Changes
+
+- [#9185](https://github.com/scalar/scalar/pull/9185): feat: add Cmd/Ctrl+S for `ui:save:local-document` so hosts (e.g. scalar-app) can match the header Save control for local workspaces
+- [#9184](https://github.com/scalar/scalar/pull/9184): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9168](https://github.com/scalar/scalar/pull/9168): fix: OAuth scope CRUD UI
+  - **Scope definitions vs selection**: adding, editing, or removing a scope on the OAuth flow now goes through dedicated workspace events `auth:upsert:scopes` and `auth:delete:scopes`, plumbed from `OAuth2` → `RequestAuthTab` → `RequestAuthDataTable` and registered in `initializeWorkspaceEventHandlers`. Updating checked scopes remains `auth:update:selected-scopes` without `newScopePayload`.
+  - **OAuthScopesInput**: row hover actions to edit or delete a scope; one shared add/edit modal; when the flow defines no scopes, the summary shows **No Scopes Defined**, **Select All** / **Deselect All** and the expand chevron are hidden, the disclosure summary is disabled, and **Add Scope** stays outside so it remains clickable; the `–` before a description is omitted when the description is empty or missing.
+  - **OAuthScopesAddModal**: supports edit mode (`scope` prop), inline errors for missing name and duplicate names (replacing toast-only validation), trims submitted names, and tests clean up teleported modal DOM between runs.
+
+- [#9199](https://github.com/scalar/scalar/pull/9199): feat: some polish for the scalar-app
+- [#9171](https://github.com/scalar/scalar/pull/9171): fix: format raw JSON responses with jsonc-parser
+
+  Raw JSON response bodies in the API client are now formatted with `jsonc-parser` instead of `@scalar/helpers` `prettyPrintJson`. The previous path parsed with `JSON.parse` and re-stringified with `JSON.stringify`, which coerces every JSON number to a JavaScript `Number` and loses precision for integers beyond `Number.MAX_SAFE_INTEGER` (a common pain point for 64-bit IDs and other large values). `jsonc-parser` formats the document as text, so numeric literals stay identical to the response on the wire while indentation and line breaks are still normalized. JSON with Comments (JSONC) tokens also remain valid alongside CodeMirror’s JSON mode.
+
+- [#9204](https://github.com/scalar/scalar/pull/9204): Remove unwanted scrollbar beside auth scope checkboxes
+- [#9150](https://github.com/scalar/scalar/pull/9150): fix: share executable URL build for copy and buildRequest
+
+  Copy URL from the operation address bar now matches the URL that is actually sent: path parameters, operation query string, environment substitution, and security schemes that use in: query are all applied the same way as Send.
+
+- [#9081](https://github.com/scalar/scalar/pull/9081): fix: handle registry document and version deletion in document settings
+- [#9173](https://github.com/scalar/scalar/pull/9173): fix: prevent address bar from stretching past max width
+- [#9125](https://github.com/scalar/scalar/pull/9125): feat: add more analytics events
+- [#9172](https://github.com/scalar/scalar/pull/9172): feat: add Preview/Raw tabs for JSON responses with true raw body view
+
+  JSON bodies now open on a formatted Preview tab (JSONC pretty-print without JSON.parse round-trip). The Raw tab shows the exact decoded response text. Other media types are unchanged; HTML, images, and other previews already used the same toggle pattern.
+
+- [#9205](https://github.com/scalar/scalar/pull/9205): fix: padding on addressbar with no servers
+- [#9197](https://github.com/scalar/scalar/pull/9197): fix: history bug on operation switch
+- [#9146](https://github.com/scalar/scalar/pull/9146): fix(api-client): narrow request table parameter info popover width
+- [#9055](https://github.com/scalar/scalar/pull/9055): fix(api-client): expand object query parameters in the request UI
+- [#9135](https://github.com/scalar/scalar/pull/9135): feat: optimize layout for mobile
+  - Hide the document breadcrumb on small screens and surface workspace
+    switching from the menu instead, so the top bar stays uncluttered.
+  - Convert the document save / discard / pull / push / publish buttons to
+    header-button styling and only render the trailing divider when there
+    are actual cluster buttons next to it.
+  - Stack the address bar onto two rows on small screens so the URL and
+    the action cluster (copy / history / send) each get a full row.
+  - Hide the "Log in" affordance from the small-screen top bar (the menu
+    still owns it) and keep only the primary "Register" CTA there.
+  - Give the pre-request and post-response script editors proper vertical
+    padding so the help text no longer clips when it wraps.
+
+- [#9174](https://github.com/scalar/scalar/pull/9174): fix(api-client): hide OAuth2 client secret when PKCE is enabled and omit it from token requests
+- [#9124](https://github.com/scalar/scalar/pull/9124): fix: posthog stream warning
+- [#9122](https://github.com/scalar/scalar/pull/9122): refactor: remove the main import file since it was empty
+- [#9134](https://github.com/scalar/scalar/pull/9134): fix(api-client): request body content types — OpenAPI extras, MIME labels, and "Other" without auto Content-Type
+
+  The request body dropdown lists built-in types first, then any additional media types from the OpenAPI operation. Labels use the MIME essence (no `charset` in the label). The **Other** option is available again for a raw body: it does **not** add an automatic `Content-Type` header (users can set one manually). Code snippets avoid injecting `Content-Type: other`.
+
+  `getDefaultHeaders` and `filterDisabledDefaultHeaders` are exported from `@scalar/workspace-store/request-example`; the API client uses them for code snippets instead of a duplicate helper.
+
+- [#9199](https://github.com/scalar/scalar/pull/9199): fix invalid Tailwind gap utility in the address bar
+- [#9130](https://github.com/scalar/scalar/pull/9130): fix: prevent stuck response overlay after overlapping sends
+
+  Fixes a case where the response loading overlay could stay visible indefinitely and **Cancel** had no effect after opening an example and sending a request very quickly (or when multiple sends overlapped).
+  The reason for that is that `ResponseLoadingOverlay` delays showing the spinner by 1s. Each `hooks:on:request:sent` scheduled a new `setTimeout` without clearing the previous one. Overlapping `sent` events could leave an orphaned timer that still called `loader.start()` after the request had already finished and `hooks:on:request:complete` had run—so the overlay turned on with no further `complete`, and **Cancel** targeted an `AbortController` that no longer matched the finished request.
+
+- [#9110](https://github.com/scalar/scalar/pull/9110): build: switch Monaco Vite plugin to ESM and align workers
+- [#9113](https://github.com/scalar/scalar/pull/9113): chore: move app files from client to scalar-app
+
 ## 3.6.1
 
 ### Patch Changes

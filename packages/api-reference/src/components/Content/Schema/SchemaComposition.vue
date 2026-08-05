@@ -1,5 +1,8 @@
 <script lang="ts" setup>
-import { ScalarListbox, type ScalarListboxOption } from '@scalar/components'
+import {
+  ScalarListbox,
+  type ScalarListboxOption,
+} from '@scalar/components/listbox'
 import { isDefined } from '@scalar/helpers/array/is-defined'
 import { ScalarIconCaretDown } from '@scalar/icons'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
@@ -11,14 +14,16 @@ import type {
 import { computed, inject, ref, watch } from 'vue'
 
 import type { SchemaOptions } from '@/components/Content/Schema/types'
+import { useLocalization } from '@/features/localization'
 import {
   REQUEST_BODY_COMPOSITION_INDEX_SYMBOL,
   type RequestBodyCompositionSelection,
 } from '@/features/Operation/request-body-composition-index'
 
 import { getSchemaType } from './helpers/get-schema-type'
-import { mergeAllOfSchemas } from './helpers/merge-all-of-schemas'
+import { partitionAllOfCompositions } from './helpers/partition-all-of-compositions'
 import { type CompositionKeyword } from './helpers/schema-composition'
+import { getCycleKey } from './helpers/schema-cycle'
 import { getModelNameFromSchema } from './helpers/schema-name'
 import Schema from './Schema.vue'
 
@@ -56,6 +61,19 @@ const props = withDefaults(
     hideHeading: false,
   },
 )
+const { translate } = useLocalization()
+
+/**
+ * Split an `allOf` into an ordered list of segments (object chunks + choice
+ * pickers) so multiple mutually-exclusive selections each render their own
+ * picker, in the position they were declared, instead of all but the first
+ * being dropped and the rest bubbling to the end.
+ */
+const allOfSegments = computed(() =>
+  props.composition === 'allOf'
+    ? partitionAllOfCompositions(props.schema).segments
+    : [],
+)
 
 /** The current composition */
 const composition = computed(() =>
@@ -75,7 +93,7 @@ const listboxOptions = computed((): ScalarListboxOption[] =>
     const resolved = resolve.schema(schema.original!)
     const label =
       (getModelNameFromSchema(resolved)?.label ?? getSchemaType(resolved)) ||
-      'Schema'
+      translate('schema.schema')
     return { id: String(index), label }
   }),
 )
@@ -130,24 +148,49 @@ watch(
   { immediate: true },
 )
 
-/**
- * Humanize composition keyword name for display.
- * Converts camelCase to Title Case (e.g., oneOf -> One of).
- */
-const humanizeType = (type: CompositionKeyword): string =>
-  type
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, (str) => str.toUpperCase())
-    .toLowerCase()
-    .replace(/^(\w)/, (c) => c.toUpperCase())
+const compositionLabel = (type: CompositionKeyword): string =>
+  translate(`schema.${type}`)
 
 /** Inside the currently selected composition */
 const selectedComposition = computed(
   () => composition.value[Number(selectedOption.value?.id ?? '0')]?.value,
 )
 
-/** Controls whether the nested schema is displayed */
-const showNestedSchema = ref(false)
+/**
+ * The request body card renders the merged `allOf` description on its outer card
+ * (see `Schema.vue`), but only for the top-level request body schema. For that
+ * single composition we hide the nested merged `Schema`'s description so the text
+ * is not shown twice. Nested request-body compositions (deeper properties) are
+ * not shown on the outer card and would otherwise lose their description
+ * entirely, because the property row already skips it when `allOf` is present.
+ *
+ * The top-level request body composition is the one whose `compositionPath` is
+ * still the request body root (`['requestBody']`); nested compositions append
+ * property segments and therefore have a longer path.
+ */
+const isRequestBodyRootComposition = computed(
+  () =>
+    props.schemaContext === 'requestBody' &&
+    props.compositionPath?.length === 1,
+)
+
+/**
+ * Cycle key for the selected composition member, derived from its raw
+ * (unresolved) value so a member that references an ancestor is detected as a
+ * cycle.
+ */
+const selectedCompositionCycleKey = computed(() =>
+  getCycleKey(
+    composition.value[Number(selectedOption.value?.id ?? '0')]?.original,
+  ),
+)
+
+/**
+ * Controls whether the nested schema is displayed. When expanding all schema
+ * properties we open it by default; the nested Schema handles cycle detection,
+ * so finite compositions render fully while recursive ones still stop.
+ */
+const showNestedSchema = ref(!!props.options.expandAllSchemaProperties)
 
 if (
   requestBodyCompositionSelectionRef &&
@@ -172,25 +215,54 @@ if (
 
 <template>
   <div class="property-rule">
-    <!-- We merge allOf schemas into a single schema -->
-    <Schema
-      v-if="props.composition === 'allOf'"
-      :breadcrumb="breadcrumb"
-      :compact="compact"
-      :compositionPath="compositionPath"
-      :discriminator="discriminator"
-      :eventBus="eventBus"
-      :hideHeading="hideHeading"
-      :hideModelNames
-      :level="level + 1"
-      :name="name"
-      :noncollapsible="true"
-      :options="options"
-      :schema="mergeAllOfSchemas(schema)"
-      :schemaContext="schemaContext" />
+    <!--
+      allOf: render the members in source order — object chunks as fields, each
+      oneOf/anyOf group as its own picker in place. Keeps every mutually-exclusive
+      selection (mergeAllOfSchemas alone drops all but the first) and preserves the
+      position of each choice group among the surrounding fields, flowing inline
+      with them as one continuous list (no extra spacing or card).
+    -->
+    <template v-if="props.composition === 'allOf'">
+      <template
+        v-for="(segment, segmentIndex) in allOfSegments"
+        :key="segmentIndex">
+        <Schema
+          v-if="segment.kind === 'object'"
+          :breadcrumb="breadcrumb"
+          :compact="compact"
+          :compositionPath="compositionPath"
+          :discriminator="discriminator"
+          :eventBus="eventBus"
+          :hideDescription="isRequestBodyRootComposition"
+          :hideHeading="hideHeading"
+          :hideModelNames
+          :level="level + 1"
+          :name="name"
+          :noncollapsible="true"
+          :options="options"
+          :schema="segment.schema"
+          :schemaContext="schemaContext" />
+        <SchemaComposition
+          v-else
+          :breadcrumb="breadcrumb"
+          :compact="compact"
+          :composition="segment.composition"
+          :compositionPath="[
+            ...(compositionPath ?? []),
+            String(segment.choiceIndex),
+          ]"
+          :eventBus="eventBus"
+          :hideHeading="hideHeading"
+          :hideModelNames
+          :level="level"
+          :options="options"
+          :schema="segment.value"
+          :schemaContext="schemaContext" />
+      </template>
+    </template>
 
     <template v-else>
-      <!-- Composition selector and panel for nested compositions -->
+      <!-- Composition selector + selected branch -->
       <ScalarListbox
         v-model="selectedOption"
         :options="listboxOptions"
@@ -198,18 +270,20 @@ if (
         <button
           class="composition-selector bg-b-1.5 hover:bg-b-2 flex w-full cursor-pointer items-center gap-1 rounded-t-lg border px-2.5 py-2.5 pr-3 text-left"
           type="button">
-          <span class="text-c-2">{{ humanizeType(props.composition) }}</span>
+          <span class="text-c-2">{{
+            compositionLabel(props.composition)
+          }}</span>
           <span
             class="composition-selector-label text-c-1"
             :class="{
               'line-through': selectedComposition?.deprecated,
             }">
-            {{ selectedOption?.label || 'Schema' }}
+            {{ selectedOption?.label || translate('schema.schema') }}
           </span>
           <div
             v-if="selectedComposition?.deprecated"
             class="text-red">
-            deprecated
+            {{ translate('common.deprecated') }}
           </div>
           <ScalarIconCaretDown />
         </button>
@@ -222,16 +296,18 @@ if (
           class="bg-b-1 hover:bg-b-2 text-c-1 flex w-full items-center justify-center gap-2 rounded-b-lg border border-t-0 px-2 py-2 text-sm font-medium transition-colors"
           type="button"
           @click="showNestedSchema = true">
-          Show Schema Details
+          {{ translate('schema.showSchemaDetails') }}
           <ScalarIconCaretDown class="h-3 w-3" />
         </button>
 
         <!-- Render the selected schema if it has content to display -->
         <Schema
           v-else
+          :key="selectedOption?.id ?? '0'"
           :breadcrumb="breadcrumb"
           :compact="compact"
           :compositionPath="compositionPath"
+          :cycleKey="selectedCompositionCycleKey"
           :discriminator="discriminator"
           :eventBus="eventBus"
           :hideHeading="hideHeading"

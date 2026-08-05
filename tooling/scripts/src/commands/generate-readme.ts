@@ -24,6 +24,20 @@ const GENERATE_COMMAND = 'pnpm --filter @scalar-internal/build-scripts start gen
 
 const COMMUNITY_SECTION_TEXT = 'We are API nerds. You too? Let’s chat on Discord:'
 
+/** Platform overview shown near the top of every README for public npm packages */
+const PLATFORM_SECTION = `---
+
+Scalar is an open-source API platform for teams who want beautiful developer interfaces without vendor lock-in.
+
+- **[API References](https://scalar.com/products/api-references/getting-started)** — Interactive API documentation from OpenAPI and AsyncAPI specs.
+- **[Developer Docs](https://scalar.com/products/docs/getting-started)** — Write in Markdown/MDX, generate API references, sync with two-way Git.
+- **[SDK Generator](https://scalar.com/products/sdk-generator/getting-started)** — Type-safe SDKs and CLIs in TypeScript, Python, Go, PHP, Java, and Ruby.
+- **[API Client](https://scalar.com/products/api-client/getting-started)** — Open-source, offline-first Postman alternative built on OpenAPI.
+
+20M+ monthly npm installs · 15,500+ GitHub stars · MIT licensed · [scalar.com](https://scalar.com)
+
+---`
+
 // Types
 type BadgeType =
   | 'npm-version'
@@ -66,14 +80,15 @@ interface ReadmeMetadata {
 interface PackageJson {
   name: string
   description?: string
+  private?: boolean
   repository?: {
     directory?: string
   }
-  readme?: ReadmeMetadata
+  scalarReadme?: ReadmeMetadata
 }
 
 export const generateReadme = new Command('generate-readme')
-  .description('Generate README.md files for packages with readme metadata')
+  .description('Generate README.md files for packages with scalarReadme metadata')
   .action(async () => {
     await generateReadmeFiles()
   })
@@ -83,7 +98,7 @@ async function generateReadmeFiles() {
   const integrationsDir = path.join(root, 'integrations')
   const packagesDir = path.join(root, 'packages')
 
-  console.log(as.cyan('Scanning for packages with readme metadata...\n'))
+  console.log(as.cyan('Scanning for packages with scalarReadme metadata...\n'))
 
   // Find all package.json files in integrations and packages directories
   const packageJsonPaths: string[] = []
@@ -106,7 +121,7 @@ async function generateReadmeFiles() {
     // Directory doesn't exist, skip
   }
 
-  // Filter to only packages with readme metadata
+  // Filter to only packages with scalarReadme metadata
   const packagesWithReadme: Array<{ directory: string; packageJson: PackageJson }> = []
 
   for (const packageJsonPath of packageJsonPaths) {
@@ -114,7 +129,7 @@ async function generateReadmeFiles() {
       const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8')
       const packageJson: PackageJson = JSON.parse(packageJsonContent)
 
-      if (packageJson.readme) {
+      if (packageJson.scalarReadme) {
         const directory = path.dirname(packageJsonPath)
         packagesWithReadme.push({ directory, packageJson })
       }
@@ -127,11 +142,11 @@ async function generateReadmeFiles() {
   }
 
   if (packagesWithReadme.length === 0) {
-    console.log(as.yellow('No packages with readme metadata found.'))
+    console.log(as.yellow('No packages with scalarReadme metadata found.'))
     return
   }
 
-  console.log(as.cyan(`Found ${packagesWithReadme.length} package(s) with readme metadata\n`))
+  console.log(as.cyan(`Found ${packagesWithReadme.length} package(s) with scalarReadme metadata\n`))
 
   // Process each package
   let successCount = 0
@@ -165,11 +180,11 @@ async function generateReadmeFiles() {
 }
 
 async function generateReadmeForPackage(root: string, directory: string, packageJson: PackageJson): Promise<void> {
-  if (!packageJson.readme) {
-    throw new Error('No readme metadata found')
+  if (!packageJson.scalarReadme) {
+    throw new Error('No scalarReadme metadata found')
   }
 
-  const metadata = packageJson.readme
+  const metadata = packageJson.scalarReadme
   const readmePath = path.join(directory, 'README.md')
   const changelogPath = path.join(directory, 'CHANGELOG.md')
 
@@ -186,6 +201,9 @@ async function generateReadmeForPackage(root: string, directory: string, package
 
   // Generate description
   const description = packageJson.description || ''
+
+  // The platform overview is only shown for packages published publicly to npm
+  const platformSection = packageJson.private === true ? '' : `\n\n${PLATFORM_SECTION}`
 
   // Generate image if provided
   let imageSection = ''
@@ -242,7 +260,7 @@ The source code in this repository is licensed under [${LICENSE_TYPE}](${GITHUB_
 
 ${badges.join('\n')}
 
-${description}${imageSection}${documentationSection}
+${description}${platformSection}${imageSection}${documentationSection}
 ${extraContent}${changelogSection}
 ${communitySection}
 

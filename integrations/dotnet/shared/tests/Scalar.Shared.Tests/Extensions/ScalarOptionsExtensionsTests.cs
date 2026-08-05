@@ -14,6 +14,7 @@ public class ScalarOptionsExtensionsTests
             .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient)
             .AddServer("https://example.com")
             .AddServer(new ScalarServer("https://example.org", "My other server"))
+            .AddPluginUrl("https://example.com/plugin.js")
             .AddDocument("v1", "Version 1")
             .AddDocuments("v2", "v3")
             .AddDocuments(new ScalarDocument("v4"));
@@ -25,7 +26,107 @@ public class ScalarOptionsExtensionsTests
         options.Servers.Should().HaveCount(2);
         options.Servers.Should().ContainSingle(x => x.Url == "https://example.com");
         options.Servers.Should().ContainSingle(x => x.Url == "https://example.org" && x.Description == "My other server");
+        options.PluginUrls.Should().ContainSingle().Which.Should().Be("https://example.com/plugin.js");
         options.Documents.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public void AddAsyncApiDocument_ShouldUseDefaultAsyncApiRoutePattern()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act
+        options.AddAsyncApiDocument("events");
+
+        // Assert
+        var document = options.Documents.Should().ContainSingle().Subject;
+        document.RoutePattern.Should().BeNull();
+        document.DocumentType.Should().Be(DocumentType.AsyncApi);
+    }
+
+    [Fact]
+    public void AddAsyncApiDocument_ShouldUseCustomRoutePatternWhenProvided()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act
+        options.AddAsyncApiDocument("events", routePattern: "/api/asyncapi/{documentName}.yaml");
+
+        // Assert
+        var document = options.Documents.Should().ContainSingle().Subject;
+        document.RoutePattern.Should().Be("/api/asyncapi/{documentName}.yaml");
+        document.DocumentType.Should().Be(DocumentType.AsyncApi);
+    }
+
+    [Fact]
+    public void AddAsyncApiDocument_ShouldUseUpdatedAsyncApiRoutePatternFromOptions()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act
+        options
+            .WithAsyncApiRoutePattern("/custom/{documentName}.json")
+            .AddAsyncApiDocument("events");
+
+        // Assert — the document stores no pattern; the mapper reads AsyncApiRoutePattern at configuration time
+        var document = options.Documents.Should().ContainSingle().Subject;
+        document.RoutePattern.Should().BeNull();
+        document.DocumentType.Should().Be(DocumentType.AsyncApi);
+        options.AsyncApiRoutePattern.Should().Be("/custom/{documentName}.json");
+    }
+
+    [Fact]
+    public void AddAsyncApiDocuments_ShouldAddAllDocumentsWithAsyncApiType()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act
+        options.AddAsyncApiDocuments("events", "commands");
+
+        // Assert
+        options.Documents.Should().HaveCount(2);
+        options.Documents.Should().AllSatisfy(d => d.DocumentType.Should().Be(DocumentType.AsyncApi));
+        options.Documents.Should().ContainSingle(d => d.Name == "events");
+        options.Documents.Should().ContainSingle(d => d.Name == "commands");
+    }
+
+    [Fact]
+    public void AddAsyncApiDocuments_ShouldForceAsyncApiTypeOnDocumentObjects()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act — pass documents that default to DocumentType.OpenApi; the overload coerces them to AsyncApi
+        options.AddAsyncApiDocuments(
+            new ScalarDocument("events", "Event Stream"),
+            new ScalarDocument("commands", RoutePattern: "/messaging/{documentName}.json"));
+
+        // Assert
+        options.Documents.Should().HaveCount(2);
+        options.Documents.Should().AllSatisfy(d => d.DocumentType.Should().Be(DocumentType.AsyncApi));
+        options.Documents.Should().ContainSingle(d => d.Name == "events" && d.Title == "Event Stream");
+        options.Documents.Should().ContainSingle(d => d.Name == "commands" && d.RoutePattern == "/messaging/{documentName}.json");
+    }
+
+    [Fact]
+    public void AddAsyncApiDocument_ShouldCoexistWithOpenApiDocuments()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+
+        // Act
+        options
+            .AddDocument("v1")
+            .AddAsyncApiDocument("events");
+
+        // Assert
+        options.Documents.Should().HaveCount(2);
+        options.Documents.Should().ContainSingle(d => d.Name == "v1" && d.DocumentType == DocumentType.OpenApi);
+        options.Documents.Should().ContainSingle(d => d.Name == "events" && d.DocumentType == DocumentType.AsyncApi);
     }
 
     [Fact]

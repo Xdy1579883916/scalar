@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import {
-  ScalarButton,
-  ScalarCodeBlock,
-  ScalarCombobox,
-  ScalarErrorBoundary,
-} from '@scalar/components'
+  findClient,
+  generateCodeSnippet,
+  getClients,
+  getCustomCodeSamples,
+  getSecrets,
+  type ClientOption,
+  type CodeExampleProps,
+  type CustomClientOption,
+} from '@scalar/blocks/code-example'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarCodeBlock } from '@scalar/components/code-block'
+import { ScalarCombobox } from '@scalar/components/combobox'
+import { ScalarErrorBoundary } from '@scalar/components/error-boundary'
 import { ScalarIconCaretDown } from '@scalar/icons'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { computed, ref, watch } from 'vue'
 
-import {
-  findClient,
-  type ClientOption,
-  type CustomClientOption,
-} from '@/v2/blocks/operation-code-sample'
-import type { OperationCodeSampleProps } from '@/v2/blocks/operation-code-sample/components/OperationCodeSample.vue'
-import { generateCodeSnippet } from '@/v2/blocks/operation-code-sample/helpers/generate-code-snippet'
-import { getClients } from '@/v2/blocks/operation-code-sample/helpers/get-clients'
-import { getCustomCodeSamples } from '@/v2/blocks/operation-code-sample/helpers/get-custom-code-samples'
-import { getSecrets } from '@/v2/blocks/operation-code-sample/helpers/get-secrets'
 import { DataTable, DataTableRow } from '@/v2/components/data-table'
 import { CollapsibleSection } from '@/v2/components/layout'
 
@@ -35,14 +33,18 @@ const {
   selectedClient,
   globalCookies,
   integration,
-} = defineProps<OperationCodeSampleProps & { eventBus: WorkspaceEventBus }>()
+} = defineProps<CodeExampleProps & { eventBus: WorkspaceEventBus }>()
 
 /** Grab any custom code samples from the operation */
 const customCodeSamples = computed(() => getCustomCodeSamples(operation))
 
 /** Merge custom code samples with the client options */
 const clients = computed(() =>
-  getClients(customCodeSamples.value, clientOptions),
+  getClients(
+    customCodeSamples.value.samples,
+    clientOptions,
+    customCodeSamples.value.label,
+  ),
 )
 
 /**
@@ -53,16 +55,18 @@ const localSelectedClient = ref<ClientOption | CustomClientOption | undefined>(
   findClient(clients.value, selectedClient),
 )
 
-/** If the globally selected client changes we can update the local one */
-watch(
-  () => selectedClient,
-  (newClient) => {
-    const client = findClient(clients.value, newClient)
-    if (client) {
-      localSelectedClient.value = client
-    }
-  },
-)
+/**
+ * Re-resolve the local client whenever the global selection or the available
+ * clients change. Watching `clients` matters when navigating between operations:
+ * the stored id stays the same, but the matching option (e.g. a custom sample)
+ * differs per operation, so without this the snippet could go stale.
+ */
+watch([() => selectedClient, clients], ([newClient]) => {
+  const client = findClient(clients.value, newClient)
+  if (client) {
+    localSelectedClient.value = client
+  }
+})
 
 /** Block secrets from being shown in the code block */
 const secretCredentials = computed(() => getSecrets(securitySchemes ?? []))
@@ -71,8 +75,8 @@ const secretCredentials = computed(() => getSecrets(securitySchemes ?? []))
 const handleClientChange = (option: ClientOption | undefined) => {
   localSelectedClient.value = option
 
-  // Emit the change if it's not a custom example
-  if (option && !option.id.startsWith('custom')) {
+  // Sync the selection globally (built-in client or custom sample keyed by language)
+  if (option) {
     eventBus.emit('workspace:update:selected-client', option.id)
   }
 }
@@ -82,7 +86,7 @@ const generatedCode = computed<string>(() =>
   generateCodeSnippet({
     defaultDisabledParameters: true,
     clientId: localSelectedClient.value?.id,
-    customCodeSamples: customCodeSamples.value,
+    customCodeSamples: customCodeSamples.value.samples,
     operation,
     method,
     path,

@@ -23,19 +23,19 @@ export default {
 </script>
 
 <script setup lang="ts">
-import { HttpMethod } from '@scalar/api-client/blocks/operation-code-sample'
 import {
   CommandActionForm,
   CommandActionInput,
 } from '@scalar/api-client/features/command-palette'
-import {
-  ScalarButton,
-  ScalarIcon,
-  ScalarListbox,
-  type ScalarComboboxOption,
-} from '@scalar/components'
+import { HttpMethod } from '@scalar/blocks/code-example'
+import { ScalarButton } from '@scalar/components/button'
+import { type ScalarComboboxOption } from '@scalar/components/combobox'
+import { ScalarIcon } from '@scalar/components/icon'
+import { ScalarListbox } from '@scalar/components/listbox'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
+import { getPathItemOperation } from '@scalar/workspace-store/helpers/for-each-path-item-operation'
+import { isOpenApiDocument } from '@scalar/workspace-store/schemas/type-guards'
 import { computed, ref, type ComputedRef } from 'vue'
 
 import { getOperationFromCurl } from '@/features/command-palette/helpers/get-operation-from-curl'
@@ -91,7 +91,17 @@ const errorMessage: ComputedRef<string | null> = computed(() => {
 
   const document = workspaceStore.workspace.documents[selectedDocument.value.id]
 
-  if (document?.paths?.[path]?.[method]) {
+  // cURL imports translate into OpenAPI operations — block AsyncAPI targets
+  // explicitly so the disabled submit button explains itself and the
+  // operation:create:operation event cannot fire against the wrong document.
+  if (document && !isOpenApiDocument(document)) {
+    return `"${selectedDocument.value.label}" is an AsyncAPI document. cURL imports can only target OpenAPI documents.`
+  }
+
+  if (
+    isOpenApiDocument(document) &&
+    getPathItemOperation(document.paths?.[path], method)
+  ) {
     return `A ${method.toUpperCase()} operation at "${path}" already exists in "${selectedDocument.value.label}". Importing this cURL would conflict with it.`
   }
 
@@ -118,6 +128,14 @@ const handleImportClick = (): void => {
   const documentName = selectedDocument.value
 
   if (isDisabled.value || !documentName) {
+    return
+  }
+
+  // Defensive guard — `errorMessage` blocks AsyncAPI selections via the
+  // disabled submit, but re-check here so we never emit the OpenAPI-only
+  // operation:create:operation event with an AsyncAPI target.
+  const document = workspaceStore.workspace.documents[documentName.id]
+  if (!isOpenApiDocument(document)) {
     return
   }
 

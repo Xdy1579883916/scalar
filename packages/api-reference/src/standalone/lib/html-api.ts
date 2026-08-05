@@ -1,15 +1,77 @@
+import { apiReferenceConfigurationWithSourceSchema } from '@scalar/schemas/api-reference'
 import type {
   AnyApiReferenceConfiguration,
   ApiReferenceConfigurationWithSource,
   CreateApiReference,
 } from '@scalar/types/api-reference'
-import { apiReferenceConfigurationWithSourceSchema } from '@scalar/schemas/api-reference'
 import { createHead } from '@unhead/vue/client'
 import { createApp, createSSRApp, h, reactive } from 'vue'
 
 import { default as ApiReference } from '@/components/ApiReference.vue'
+import { hasPluginUrls, loadPluginsFromUrls } from '@/standalone/lib/load-plugins-from-urls'
 
 const getSpecScriptTag = (doc: Document) => doc.getElementById('api-reference')
+
+/**
+ * The id given to the standalone build's single injected `<style>` tag.
+ * Keep in sync with `vite.standalone.config.ts` and `vite.standalone.esm.config.ts`.
+ */
+const STANDALONE_STYLE_ID = 'scalar-style'
+
+/**
+ * Per-document bookkeeping for the standalone build's injected styles.
+ *
+ * The CDN build injects all of its CSS into one `<style>` tag in `<head>`. Under
+ * SPA-style navigation (Turbo Drive, htmx boost, Astro view transitions) the host
+ * swaps the DOM without reloading the window, so those document-level styles
+ * (`@layer scalar-base`, the `:root` theme variables) would otherwise linger and
+ * bleed into the host app's next page. We reference-count the live instances and
+ * detach the styles when the last one is destroyed, re-attaching them when a new
+ * instance mounts so navigating back to the reference is still styled.
+ *
+ * State is keyed by document so the counter survives navigations (the JS context
+ * persists) while staying isolated per page.
+ */
+const standaloneStyleState = new WeakMap<Document, { count: number; detachedStyle: HTMLStyleElement | null }>()
+
+const getStandaloneStyleState = (doc: Document): { count: number; detachedStyle: HTMLStyleElement | null } => {
+  const existing = standaloneStyleState.get(doc)
+  if (existing) {
+    return existing
+  }
+
+  const state = { count: 0, detachedStyle: null }
+  standaloneStyleState.set(doc, state)
+
+  return state
+}
+
+/** Track a freshly mounted instance and restore previously detached styles. */
+const retainStandaloneStyles = (doc: Document): void => {
+  const state = getStandaloneStyleState(doc)
+  state.count += 1
+
+  if (state.detachedStyle && !doc.getElementById(STANDALONE_STYLE_ID)) {
+    doc.head.appendChild(state.detachedStyle)
+    state.detachedStyle = null
+  }
+}
+
+/** Release an instance and detach the injected styles once the last one is gone. */
+const releaseStandaloneStyles = (doc: Document): void => {
+  const state = getStandaloneStyleState(doc)
+  state.count = Math.max(0, state.count - 1)
+
+  if (state.count > 0) {
+    return
+  }
+
+  const styleElement = doc.getElementById(STANDALONE_STYLE_ID)
+  if (styleElement instanceof HTMLStyleElement) {
+    state.detachedStyle = styleElement
+    styleElement.remove()
+  }
+}
 
 /**
  * Reading the configuration from the data-attributes.
@@ -207,12 +269,44 @@ export const createApiReference: CreateApiReference = (
   const shouldHydrate = !!optionalConfiguration && !!mountElement && mountElement.children.length > 0
   let app = createReferenceApp(shouldHydrate)
 
+  // Track whether this instance mounted so `destroy` only releases the shared
+  // standalone styles for instances that actually retained them.
+  let hasMounted = false
+
   if (optionalConfiguration) {
     if (mountElement) {
-      app.mount(mountElement)
+      const mount = () => {
+        app.mount(mountElement)
+        hasMounted = true
+        retainStandaloneStyles(document)
+      }
+
+      if (hasPluginUrls(props.configuration)) {
+        // Plugins referenced by URL must be resolved before the app mounts — plugin registration
+        // happens once at first render and is not reactive, so a plugin that arrives later would
+        // never be picked up.
+        loadPluginsFromUrls(props.configuration).then(() => {
+          // Skip mounting when the instance was destroyed while the plugins were loading.
+          if (!abortController.signal.aborted) {
+            mount()
+          }
+        })
+      } else {
+        mount()
+      }
     } else {
       console.error('Could not find a mount point for API References:', elementOrSelectorOrConfig)
     }
+  }
+
+  // Tie the deprecated `document` listeners to an AbortController so `destroy`
+  // can remove them all at once. Without this, every `createApiReference()`
+  // call leaks three permanent listeners — visible during Astro view
+  // transitions where each navigation creates a new instance.
+  const abortController = new AbortController()
+  const listenerOptions: AddEventListenerOptions = {
+    capture: false,
+    signal: abortController.signal,
   }
 
   /**
@@ -249,13 +343,21 @@ export const createApiReference: CreateApiReference = (
       app = createReferenceApp()
       app.mount(currentElement)
     },
-    false,
+    listenerOptions,
   )
 
   /** Destroy the current API Reference instance */
   const destroy = () => {
+    abortController.abort()
     props.configuration = {}
-    app.unmount()
+
+    // Only unmount an app that actually mounted. With `pluginUrls`, mounting is deferred until the
+    // plugin modules resolve, so `destroy` can run first — unmounting then would just warn.
+    if (hasMounted) {
+      hasMounted = false
+      app.unmount()
+      releaseStandaloneStyles(document)
+    }
   }
 
   /**
@@ -268,7 +370,7 @@ export const createApiReference: CreateApiReference = (
       console.warn('scalar:destroy-references event has been deprecated, please use scalarInstance.destroy instead.')
       destroy()
     },
-    false,
+    listenerOptions,
   )
 
   /**
@@ -285,7 +387,7 @@ export const createApiReference: CreateApiReference = (
         Object.assign(props, ev.detail)
       }
     },
-    false,
+    listenerOptions,
   )
 
   const instance = {

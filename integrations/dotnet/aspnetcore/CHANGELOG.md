@@ -1,5 +1,71 @@
 # @scalar/aspnetcore
 
+## 2.16.17
+
+## 2.16.16
+
+## 2.16.15
+
+## 2.16.14
+
+## 2.16.13
+
+## 2.16.12
+
+## 2.16.11
+
+### Patch Changes
+
+- [#9620](https://github.com/scalar/scalar/pull/9620): chore: extract the hosting-agnostic HTML/static-asset rendering core into the shared project so it can be reused across .NET integrations. No public API or behavior change for `Scalar.AspNetCore`.
+
+## 2.16.10
+
+## 2.16.9
+
+## 2.16.8
+
+## 2.16.7
+
+## 2.16.6
+
+## 2.16.5
+
+## 2.16.4
+
+## 2.16.3
+
+## 2.16.2
+
+## 2.16.1
+
+## 2.16.0
+
+### Minor Changes
+
+- [#9413](https://github.com/scalar/scalar/pull/9413): feat(dotnet): add AsyncAPI document support
+
+  Adds `AddAsyncApiDocument`, `AddAsyncApiDocuments`, and `WithAsyncApiRoutePattern` so AsyncAPI documents can be registered alongside OpenAPI documents in the same Scalar API Reference. AsyncAPI documents use a separate default route pattern (`/asyncapi/{documentName}.json`) that is resolved lazily at configuration time.
+
+## 2.15.3
+
+## 2.15.2
+
+## 2.15.1
+
+## 2.15.0
+
+### Minor Changes
+
+- [#9240](https://github.com/scalar/scalar/pull/9240): Support cryptographic nonce for script tags, with automatic per-request generation via the parameterless `WithNonce()` extension.
+
+## 2.14.15
+
+## 2.14.14
+
+## 2.14.13
+
+## 2.14.12
+
 ## 2.14.11
 
 ## 2.14.10

@@ -1,5 +1,23 @@
 # @scalar/icons
 
+## 0.7.5
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.7.4
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.7.3
+
+### Patch Changes
+
+- [#9310](https://github.com/scalar/scalar/pull/9310): The library icon resolver (`@scalar/icons/library`) now eagerly bundles the `interface-content-folder` SVG and pre-populates the icon cache with it. This is the default fallback used by `<SidebarItem>` whenever an item doesn't specify a custom `x-scalar-icon`, so the most common path through the sidebar no longer waits on a per-icon dynamic chunk to resolve. The other 83 SVGs in the library remain lazy.
+
 ## 0.7.2
 
 ### Patch Changes

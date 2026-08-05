@@ -1,4 +1,4 @@
-import { ScalarListbox } from '@scalar/components'
+import { ScalarListbox } from '@scalar/components/listbox'
 import { createWorkspaceEventBus } from '@scalar/workspace-store/events'
 import { coerceValue } from '@scalar/workspace-store/schemas/typebox-coerce'
 import type { OperationObject, ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
@@ -124,6 +124,7 @@ const props: ExtractComponentProps<typeof ClassicLayout> = {
   operation,
   options: {
     expandAllResponses: false,
+    expandAllSchemaProperties: false,
     hideModels: false,
     hideTestRequestButton: true,
     layout: 'classic',
@@ -134,6 +135,7 @@ const props: ExtractComponentProps<typeof ClassicLayout> = {
   path: '/widgets',
   requiredSecurity,
   selectedClient: 'shell/curl',
+  selectedExample: '',
   selectedSecuritySchemes: [],
   selectedServer,
 }
@@ -249,7 +251,50 @@ describe('ClassicLayout', () => {
     await requestBody.vm.$emit('update:selectedContentType', 'application/x-www-form-urlencoded')
     await nextTick()
 
-    const codeSample = wrapper.findComponent({ name: 'OperationCodeSample' })
+    const codeSample = wrapper.findComponent({ name: 'CodeExample' })
     expect(codeSample.props('selectedContentType')).toBe('application/x-www-form-urlencoded')
+  })
+
+  it('opens the test request with the example shown in the snippet, even when the document-wide selection is missing', async () => {
+    const exampleProps: ExtractComponentProps<typeof ClassicLayout> = {
+      ...props,
+      id: 'create-widget-examples',
+      // The document-wide selection points at an example this operation does not define
+      selectedExample: 'missing',
+      options: { ...props.options, hideTestRequestButton: false },
+      operation: {
+        ...operation,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              examples: {
+                first: { value: { foo: 'bar' } },
+                second: { value: { foo: 'baz' } },
+              },
+            },
+          },
+        },
+      },
+    }
+
+    const wrapper = mount(ClassicLayout, {
+      props: exampleProps,
+      global: {
+        stubs: {
+          RouterLink: {
+            name: 'RouterLink',
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await nextTick()
+
+    const testButton = wrapper.findComponent({ name: 'TestRequestButton' })
+    expect(testButton.exists()).toBe(true)
+    // The button mirrors the snippet's resolved key (first example), not the missing document-wide one
+    expect(testButton.props('exampleName')).toBe('first')
   })
 })

@@ -30,6 +30,11 @@ export default defineConfig({
   define: {
     'process.env.NODE_ENV': '"production"',
     'PACKAGE_VERSION': `"${version}"`,
+    // Stamp this version onto bundled sub-packages (e.g. @scalar/blocks) whose
+    // own PACKAGE_VERSION is already baked into their prebuilt dist. Without this
+    // the request-snippet User-Agent would report the block library's version
+    // (e.g. Scalar/0.0.0) instead of the API reference version shipped here.
+    'OVERRIDE_PACKAGE_VERSION': `"${version}"`,
   },
   resolve: {
     alias: {
@@ -41,7 +46,15 @@ export default defineConfig({
   plugins: [
     vue(),
     tailwindcss(),
-    cssInjectedByJsPlugin(),
+    // Tag the single injected <style> with a known id so the runtime can detach
+    // it on `destroy()`. Without this, the global styles linger in <head> after
+    // SPA-style navigation (Turbo Drive, htmx). Keep the id in sync with
+    // `STANDALONE_STYLE_ID` in `src/standalone/lib/html-api.ts`.
+    //
+    // `useStrictCSP` makes the injected <style> read its nonce from a
+    // `<meta property="csp-nonce">` tag, so the bundle's CSS can be served under a strict
+    // Content Security Policy. See the `nonce` option in @scalar/client-side-rendering.
+    cssInjectedByJsPlugin({ attributes: { id: 'scalar-style' }, useStrictCSP: true }),
     webpackStats(),
     banner({
       outDir: 'dist/browser',
@@ -65,6 +78,11 @@ export default defineConfig({
       // is ever rendered in the standalone API reference. They leak in through the
       // @scalar/components barrel via @scalar/api-client but are never mounted.
       external: [/^radix-vue/, /^@scalar\/openapi-parser/],
+      // Treat every non-CSS module as side-effect-free so Rolldown can drop
+      // unreachable code paths from the bundle (matches the default lib config).
+      treeshake: {
+        moduleSideEffects: (id) => id.includes('.css'),
+      },
       output: {
         entryFileNames: `[name]-${version}.js`,
         globals: {

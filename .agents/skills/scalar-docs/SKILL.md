@@ -56,6 +56,7 @@ Validate config: `npx @scalar/cli project check-config`
 | `scalar`     | `string` | Configuration version. Use `"2.0.0"`                                       |
 | `info`       | `object` | Project metadata (title, description)                                       |
 | `navigation` | `object` | Navigation structure (header, routes, sidebar, tabs)                        |
+| `versions`   | `object` | Multi-version navigation. Use instead of `navigation` for versioned docs    |
 | `siteConfig` | `object` | Site-level settings (domain, theme, head, logo, routing)                    |
 | `assetsDir`  | `string` | Relative path to assets folder from config root                             |
 
@@ -95,6 +96,8 @@ Links in the top bar. Use `type: "spacer"` to push items before it left and afte
 
 Properties: `title`, `type` (`"link"` | `"spacer"`), `to`, `style` (`"button"` | `"link"`), `icon`, `newTab`
 
+The header only renders when this array has at least one item, and it is where the logo goes. A lone `{ "type": "spacer" }` is enough to get a header with just the logo.
+
 ### navigation.sidebar
 
 Links at the bottom of the sidebar:
@@ -114,6 +117,8 @@ Tabs for quick access to sections:
   { "title": "API", "path": "/api", "icon": "phosphor/regular/plug" }
 ]
 ```
+
+Tabs and a header work together, and neither requires the other. With tabs but no header, the logo renders in the tab bar.
 
 ### Route Types
 
@@ -172,6 +177,17 @@ API reference from file, Registry, or URL:
 
 Display modes: `folder` (default), `flat`, `nested`.
 
+**Single page mode:** Set `singlePage: true` to render all operations on a single page instead of creating separate pages for each operation:
+
+```json
+"/api": {
+  "type": "openapi",
+  "title": "My API",
+  "filepath": "docs/api-reference/openapi.yaml",
+  "singlePage": true
+}
+```
+
 API Reference options (authentication, theme, etc.) go in a `config` object — same options as the [API Reference configuration](https://docs.scalar.com/configuration).
 
 #### Group (`type: "group"`)
@@ -192,6 +208,22 @@ Collapsible section with children:
 ```
 
 Modes: `flat`, `nested`, `folder` (default).
+
+**Folder landing pages:** Add a `page` property to make clicking the folder navigate to a page:
+
+```json
+"/company": {
+  "type": "group",
+  "title": "Company",
+  "mode": "folder",
+  "page": { "type": "page", "title": "About Us", "filepath": "docs/company/index.md" },
+  "children": {
+    "/team": { "type": "page", "title": "Our Team", "filepath": "docs/company/team.md" }
+  }
+}
+```
+
+**Default open state:** Use `open: true` to expand a folder by default.
 
 #### Link (`type: "link"`)
 
@@ -222,6 +254,8 @@ External URL:
   "lightMode": "https://example.com/logo-light.svg"
 }
 ```
+
+The logo renders on the first surface the site has: **header** (if `navigation.header` has items) → **tabs** (if `navigation.tabs` but no header) → **sidebar** (if neither). A page that hides all three via `layout` does not render it at all. With no `logo` set, `info.title` renders in the same place.
 
 **Theme** — one of: `default`, `alternate`, `moon`, `purple`, `solarized`, `bluePlanet`, `deepSpace`, `saturn`, `kepler`, `mars`, `laserwave`, `none`
 
@@ -351,10 +385,54 @@ npx @scalar/cli project preview
 | ------- | ----------- |
 | `npx @scalar/cli project init` | Create scalar.config.json |
 | `npx @scalar/cli project check-config` | Validate config |
-| `npx @scalar/cli project preview` | Local preview (port 7971) |
+| `npx @scalar/cli project preview` | Local preview (port 7970) |
 | `npx @scalar/cli project publish` | Publish from local files |
 | `npx @scalar/cli project publish --github` | Publish from linked GitHub repo |
 | `npx @scalar/cli project upgrade` | Migrate from Docs 1.0 |
+
+---
+
+## Versions
+
+Use `versions` instead of `navigation` to create multi-version documentation.
+
+A version with the key `default` is required — it is the version shown by default. Additional versions (for example `v1`) can use any identifier and appear in the version selector. Inside each version's `routes`, wrap pages in a top-level `group` so they render correctly in the sidebar.
+
+```json
+{
+  "scalar": "2.0.0",
+  "versions": {
+    "default": {
+      "title": "Version 2.0",
+      "routes": {
+        "/": {
+          "type": "group",
+          "title": "Documentation",
+          "children": {
+            "/": { "type": "page", "title": "Intro", "filepath": "docs/v2/intro.md" },
+            "/api": { "type": "openapi", "title": "API", "filepath": "docs/v2/openapi.yaml" }
+          }
+        }
+      }
+    },
+    "v1": {
+      "title": "Version 1.0",
+      "routes": {
+        "/": {
+          "type": "group",
+          "title": "Documentation",
+          "children": {
+            "/": { "type": "page", "title": "Intro", "filepath": "docs/v1/intro.md" },
+            "/api": { "type": "openapi", "title": "API", "filepath": "docs/v1/openapi.yaml" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Each version entry supports: `title`, `routes` (required), `header`, `sidebar`, `tabs`.
 
 ---
 
@@ -378,6 +456,7 @@ npx @scalar/cli project preview
 - [Docs Starter Kit](https://github.com/scalar/starter)
 - [Configuration reference](https://docs.scalar.com/products/docs/configuration/scalar.config.json)
 - [Navigation](https://docs.scalar.com/products/docs/configuration/navigation)
+- [Versions](https://docs.scalar.com/products/docs/configuration/versions)
 - [Site config](https://docs.scalar.com/products/docs/configuration/site-config)
 - [Themes](https://docs.scalar.com/products/docs/configuration/themes)
 - [Domains](https://docs.scalar.com/products/docs/configuration/domains)

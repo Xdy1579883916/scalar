@@ -1,5 +1,44 @@
 # @scalar/code-highlight
 
+## 0.4.3
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.4.2
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.4.1
+
+### Patch Changes
+
+- [#9659](https://github.com/scalar/scalar/pull/9659): fix: keep rendering Markdown when a code block fails to highlight
+
+  Syntax highlighting is now best-effort: if a highlight.js grammar throws at runtime (for example a Unicode regex that a production minifier mangles), the code block falls back to plain text instead of the error taking down the whole Markdown section.
+
+## 0.4.0
+
+### Minor Changes
+
+- [#9590](https://github.com/scalar/scalar/pull/9590): Add syntax highlighting for the Mojo programming language
+
+## 0.3.6
+
+### Patch Changes
+
+- [#9508](https://github.com/scalar/scalar/pull/9508): Fix Python code samples appearing mostly unstyled by highlighting function and method call sites
+- [#9506](https://github.com/scalar/scalar/pull/9506): Add Scalar scrollbar styling to highlighted Markdown code blocks.
+
+## 0.3.5
+
+### Patch Changes
+
+- [#9451](https://github.com/scalar/scalar/pull/9451): Bundle runtime dependencies into the build so CommonJS-only packages (like `extend` and `debug`) no longer leak to consumers and break Vite dev under pnpm
+
 ## 0.3.4
 
 ### Patch Changes

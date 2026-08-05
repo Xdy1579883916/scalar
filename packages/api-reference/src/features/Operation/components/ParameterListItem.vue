@@ -3,12 +3,13 @@ import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
 import {
   ScalarMarkdown,
   ScalarMarkdownSummary,
-  ScalarWrappingText,
-} from '@scalar/components'
+} from '@scalar/components/markdown'
+import { ScalarWrappingText } from '@scalar/components/wrapping-text'
 import { ScalarIconCaretRight } from '@scalar/icons'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import type {
+  OpenApiDocument,
   ParameterObject,
   ResponseObject,
   SchemaObject,
@@ -18,22 +19,29 @@ import { computed, ref } from 'vue'
 import { getRefName } from '@/components/Content/Schema/helpers/get-ref-name'
 import SchemaProperty from '@/components/Content/Schema/SchemaProperty.vue'
 import type { OperationProps } from '@/features/Operation/Operation.vue'
+import { scrollTargetId } from '@/helpers/lazy-bus'
 
 import ContentTypeSelect from './ContentTypeSelect.vue'
 import Headers from './Headers.vue'
 import { getParameterExamples } from './helpers/get-parameter-examples'
 
-const { name, parameter, options, collapsableItems } = defineProps<{
-  parameter: ParameterObject | ResponseObject
-  name: string
-  breadcrumb?: string[]
-  eventBus: WorkspaceEventBus | null
-  collapsableItems?: boolean
-  options: Pick<
-    OperationProps['options'],
-    'hideModels' | 'orderRequiredPropertiesFirst' | 'orderSchemaPropertiesBy'
-  >
-}>()
+const { name, parameter, options, collapsableItems, breadcrumb, document } =
+  defineProps<{
+    parameter: ParameterObject | ResponseObject
+    name: string
+    breadcrumb?: string[]
+    eventBus: WorkspaceEventBus | null
+    collapsableItems?: boolean
+    /** The document the operation belongs to, used to resolve schema references for display */
+    document?: OpenApiDocument
+    options: Pick<
+      OperationProps['options'],
+      | 'hideModels'
+      | 'orderRequiredPropertiesFirst'
+      | 'orderSchemaPropertiesBy'
+      | 'expandAllSchemaProperties'
+    >
+  }>()
 
 /** Whether the markdown summary is being truncated */
 const truncated = ref(false)
@@ -119,10 +127,35 @@ const value = computed(() => {
 const shouldCollapse = computed<boolean>(() =>
   Boolean(content.value || headers.value || schema.value || truncated.value),
 )
+
+/**
+ * The breadcrumb passed to the schema. Collapsible items (responses) render their
+ * schema without a name to avoid a duplicate heading, so we push the item name
+ * (e.g. the status code) onto the breadcrumb here to keep property anchors unique.
+ */
+const schemaBreadcrumb = computed<string[] | undefined>(() =>
+  collapsableItems && breadcrumb && name ? [...breadcrumb, name] : breadcrumb,
+)
+
+/**
+ * Whether a deep link points at a property inside this collapsed item. When it
+ * does, the disclosure opens on mount so a fresh navigation can render the target
+ * and scroll it into view (mirrors how collapsible schema disclosures behave).
+ */
+const isOnScrollTargetPath = computed<boolean>(() => {
+  const path = schemaBreadcrumb.value?.join('.')
+  if (!path) {
+    return false
+  }
+  const target = scrollTargetId.value
+  return target === path || target.startsWith(`${path}.`)
+})
 </script>
 <template>
   <li class="parameter-item group/parameter-item">
-    <Disclosure v-slot="{ open }">
+    <Disclosure
+      v-slot="{ open }"
+      :defaultOpen="isOnScrollTargetPath">
       <component
         :is="shouldCollapse ? DisclosureButton : 'div'"
         v-if="collapsableItems"
@@ -150,6 +183,45 @@ const shouldCollapse = computed<boolean>(() =>
           v-else
           class="flex-1" />
       </component>
+      <DisclosurePanel
+        class="parameter-item-container parameter-item-container-markdown"
+        :static="!collapsableItems">
+        <ScalarMarkdown
+          v-if="collapsableItems && parameter.description"
+          class="parameter-item-description"
+          :value="parameter.description" />
+        <!-- Headers -->
+        <Headers
+          v-if="headers"
+          :breadcrumb="breadcrumb"
+          :document="document"
+          :eventBus="eventBus"
+          :expandAllSchemaProperties="options.expandAllSchemaProperties"
+          :headers="headers"
+          :orderRequiredPropertiesFirst="options.orderRequiredPropertiesFirst"
+          :orderSchemaPropertiesBy="options.orderSchemaPropertiesBy" />
+
+        <!-- Schema -->
+        <SchemaProperty
+          is="div"
+          :breadcrumb="schemaBreadcrumb"
+          compact
+          :description="collapsableItems ? '' : parameter.description"
+          :eventBus="eventBus"
+          :hideWriteOnly="true"
+          :modelName="schemaModelName"
+          :name="collapsableItems ? '' : name"
+          :noncollapsible="true"
+          :options="{
+            hideWriteOnly: true,
+            orderRequiredPropertiesFirst: options.orderRequiredPropertiesFirst,
+            orderSchemaPropertiesBy: options.orderSchemaPropertiesBy,
+            expandAllSchemaProperties: options.expandAllSchemaProperties,
+            document,
+          }"
+          :required="'required' in parameter && parameter.required"
+          :schema="value" />
+      </DisclosurePanel>
       <div
         v-if="shouldCollapse && content"
         class="absolute top-[calc(10px+0.5lh)] right-0 z-0 flex -translate-y-1/2 items-center text-base"
@@ -163,41 +235,6 @@ const shouldCollapse = computed<boolean>(() =>
           v-model="selectedContentType"
           :content="content" />
       </div>
-      <DisclosurePanel
-        class="parameter-item-container parameter-item-container-markdown"
-        :static="!collapsableItems">
-        <ScalarMarkdown
-          v-if="collapsableItems && parameter.description"
-          class="parameter-item-description"
-          :value="parameter.description" />
-        <!-- Headers -->
-        <Headers
-          v-if="headers"
-          :breadcrumb="breadcrumb"
-          :eventBus="eventBus"
-          :headers="headers"
-          :orderRequiredPropertiesFirst="options.orderRequiredPropertiesFirst"
-          :orderSchemaPropertiesBy="options.orderSchemaPropertiesBy" />
-
-        <!-- Schema -->
-        <SchemaProperty
-          is="div"
-          :breadcrumb="breadcrumb"
-          compact
-          :description="collapsableItems ? '' : parameter.description"
-          :eventBus="eventBus"
-          :hideWriteOnly="true"
-          :modelName="schemaModelName"
-          :name="collapsableItems ? '' : name"
-          :noncollapsible="true"
-          :options="{
-            hideWriteOnly: true,
-            orderRequiredPropertiesFirst: options.orderRequiredPropertiesFirst,
-            orderSchemaPropertiesBy: options.orderSchemaPropertiesBy,
-          }"
-          :required="'required' in parameter && parameter.required"
-          :schema="value" />
-      </DisclosurePanel>
     </Disclosure>
   </li>
 </template>

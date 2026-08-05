@@ -1,5 +1,75 @@
 # @scalar/sidebar
 
+## 0.9.34
+
+## 0.9.33
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.9.32
+
+## 0.9.31
+
+## 0.9.30
+
+## 0.9.29
+
+## 0.9.28
+
+## 0.9.27
+
+## 0.9.26
+
+## 0.9.25
+
+### Patch Changes
+
+- [#9597](https://github.com/scalar/scalar/pull/9597): Add API Reference UI localization configuration with built-in English, Russian, Spanish, French, German, Simplified Chinese and Arabic translations, including automatic RTL direction for Arabic locales.
+
+  Update the shared theme reset so text inputs align to the logical start by default for RTL documents.
+
+  Add a `mergeObjects` deep-merge helper to `@scalar/helpers`, used by the localization layer to merge translation overrides onto the built-in locale.
+
+## 0.9.24
+
+## 0.9.23
+
+## 0.9.22
+
+## 0.9.21
+
+## 0.9.20
+
+## 0.9.19
+
+## 0.9.18
+
+## 0.9.17
+
+## 0.9.16
+
+## 0.9.15
+
+## 0.9.14
+
+### Patch Changes
+
+- [#9228](https://github.com/scalar/scalar/pull/9228): fix: remove chevron
+
+## 0.9.13
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: some polish for the scalar-app
+
+## 0.9.12
+
+### Patch Changes
+
+- [#9199](https://github.com/scalar/scalar/pull/9199): feat: some polish for the scalar-app
+
 ## 0.9.11
 
 ## 0.9.10

@@ -1,10 +1,12 @@
 <script lang="ts" setup>
-import { ScalarButton, useLoadingState } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { useLoadingState } from '@scalar/components/loading'
 import type { ExternalUrls } from '@scalar/types/api-reference'
 import { useToasts } from '@scalar/use-toasts'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import { nextTick } from 'vue'
 
+import { useLocalization } from '@/features/localization'
 import { uploadTempDocument } from '@/helpers/upload-temp-document'
 
 const {
@@ -21,6 +23,7 @@ const tempDocUrl = defineModel<string>('url')
 
 const { toast } = useToasts()
 const loader = useLoadingState()
+const { translate } = useLocalization()
 
 /** Open the registration link in a new tab */
 function openRegisterLink(docUrl: string) {
@@ -48,7 +51,7 @@ async function generateRegisterLink() {
   const document = workspace.exportActiveDocument('json')
 
   if (!document) {
-    toast('Unable to export active document', 'error')
+    toast(translate('developerTools.unableToExportDocument'), 'error')
     await loader.invalidate()
     return
   }
@@ -63,7 +66,9 @@ async function generateRegisterLink() {
     await loader.clear()
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : 'An unknown error occurred'
+      error instanceof Error
+        ? error.message
+        : translate('developerTools.unknownError')
     toast(message, 'error')
     await loader.invalidate()
   }
@@ -74,6 +79,6 @@ async function generateRegisterLink() {
     class="h-auto p-2.5"
     :loader
     @click="generateRegisterLink">
-    <slot>Generate</slot>
+    <slot>{{ translate('developerTools.generate') }}</slot>
   </ScalarButton>
 </template>

@@ -1,5 +1,137 @@
 # scalar-app
 
+## 1.1.20
+
+## 1.1.19
+
+## 1.1.18
+
+## 1.1.17
+
+## 1.1.16
+
+## 1.1.15
+
+## 1.1.14
+
+## 1.1.13
+
+## 1.1.12
+
+### Patch Changes
+
+- [#9614](https://github.com/scalar/scalar/pull/9614): Fix importing OpenAPI documents from a URL in the desktop app. The temporary draft store used during import now reuses the IPC-backed fetch, so URL imports no longer get blocked by the Content Security Policy.
+
+## 1.1.11
+
+## 1.1.10
+
+## 1.1.9
+
+### Patch Changes
+
+- [#9533](https://github.com/scalar/scalar/pull/9533): Make the Watch Mode source URL editable in document settings, so you can re-point a document at a different source without deleting and re-importing it
+
+## 1.1.8
+
+### Patch Changes
+
+- [#9342](https://github.com/scalar/scalar/pull/9342): fix: resolve operations when OpenAPI path items use `$ref`
+
+  Path entries and webhooks can reference `components.pathItems` instead of inlining operations. Navigation, mutators, search, and markdown export now resolve path-item references before reading HTTP methods and path-level parameters.
+
+## 1.1.7
+
+## 1.1.6
+
+## 1.1.5
+
+## 1.1.4
+
+## 1.1.3
+
+### Patch Changes
+
+- [#9332](https://github.com/scalar/scalar/pull/9332): fix: running scripts on electron
+- [#9315](https://github.com/scalar/scalar/pull/9315): fix: fail Vite and electron-vite builds when required VITE\_\* environment variables are missing
+
+## 1.1.2
+
+### Patch Changes
+
+- [#9314](https://github.com/scalar/scalar/pull/9314): fix(scalar-app): redirect to the correct HTML file on logout in Electron
+
+  On Electron the app loads from a `file://` URL and uses hash-based routing, so the previous `window.location.href = '/'` resolved to the filesystem root and broke the app. Logout now resets the hash on the current HTML file and reloads on Electron, while the web build still hard routes to `/`.
+
+- [#9316](https://github.com/scalar/scalar/pull/9316): chore: load env vars correctly
+
+## 1.1.1
+
+### Patch Changes
+
+- [#9248](https://github.com/scalar/scalar/pull/9248): feat: open the API client on the selected operation when launching from API Reference. The modal "Open API Client" link now includes `operation_path` and `operation_method` query params; scalar-app reads them after import and navigates to that request. Also fixes address bar blur replay when focus moves programmatically on first navigation into a draft operation.
+- [#9260](https://github.com/scalar/scalar/pull/9260): chore: remove `'unsafe-eval'` from the desktop/web app CSP
+
+  Pre-request and post-response scripts run through `postman-sandbox`, which relies on `eval`. Instead of allowing `'unsafe-eval'` in the main application CSP, script execution now happens inside an isolated sandbox iframe (`sandbox.html`) that is loaded from a real same-origin URL and carries its own permissive CSP. The host talks to it over `postMessage`, so the main `script-src` no longer needs `'unsafe-eval'`.
+
+- [#9263](https://github.com/scalar/scalar/pull/9263): chore: explicitly enable `contextIsolation` and `nodeIntegration: false` on the desktop app's BrowserWindow to satisfy the toDesktop static analysis check (these were already the secure Electron defaults at runtime)
+- [#9271](https://github.com/scalar/scalar/pull/9271): fix: apply layout-aware CORS proxy defaults when creating workspaces and loading imported documents, so the web client uses proxy.scalar.com and the desktop client skips the proxy unless configured in settings.
+
+## 1.1.0
+
+### Minor Changes
+
+- [#9229](https://github.com/scalar/scalar/pull/9229): feat: sidebar document filters and registry namespace UX
+  - Rework `AppSidebar` (and related UI) so document lists respect title + namespace filtering together, with clearer controls and layout/markup cleanup.
+  - Fix sidebar navigation scrolling, a small `PublishDocumentModal` issue, and a minor tweak to `ScalarSidebarSearchInput`.
+
+### Patch Changes
+
+- [#9232](https://github.com/scalar/scalar/pull/9232): fix: allow images from any HTTPS source in CSP
+- [#9235](https://github.com/scalar/scalar/pull/9235): fix: align team picker with dashboard
+- [#9221](https://github.com/scalar/scalar/pull/9221): fix: csp issue
+- [#9236](https://github.com/scalar/scalar/pull/9236): fix: some analytics events not firing
+
+## 1.0.13
+
+### Patch Changes
+
+- [#9063](https://github.com/scalar/scalar/pull/9063): feat(scalar-app): add a "What's new" modal accessible from the Get Started page so users can browse curated release notes inside the client. A small accent dot appears on the trigger when there are unseen releases. Release notes are bundled with the package via `RELEASE_NOTES.json` (the source of truth, imported directly so no runtime markdown parsing is needed) and filtered to the version the user has actually installed. The release-notes generator updates the JSON file during `pnpm changeset version` and regenerates a derived `RELEASE_NOTES.md` view alongside it.
+- [#9180](https://github.com/scalar/scalar/pull/9180): feat: added team switching and fixed up team redirection and workspace routing
+- [#9109](https://github.com/scalar/scalar/pull/9109): fix: monaco editor vite plugin
+- [#9199](https://github.com/scalar/scalar/pull/9199): feat: some polish for the scalar-app
+- [#9167](https://github.com/scalar/scalar/pull/9167): feat: support media attachments for the changelog modal
+- [#9203](https://github.com/scalar/scalar/pull/9203): chore: added scalar domain to csp; allow localhost img/media sources during Vite dev only
+- [#9152](https://github.com/scalar/scalar/pull/9152): feat: add team switching to the scalar app
+- [#9147](https://github.com/scalar/scalar/pull/9147): fix: rename default workspace labels to Local workspace and Team workspace
+- [#9125](https://github.com/scalar/scalar/pull/9125): feat: add more analytics events
+- [#9081](https://github.com/scalar/scalar/pull/9081): feat: integrate the new registry adapter
+- [#9118](https://github.com/scalar/scalar/pull/9118): fix: remove shortcuts label from the editor page
+- [#9195](https://github.com/scalar/scalar/pull/9195): feat: handle workspace uid and slug reconciliation
+
+  App is updated to treat workspaceUid / teamUid as canonical, to reconcile server-driven team slug changes against persisted records (and clear stale tab metadata where needed), and to route workspace resume flows through a clearer resumeOrGetStarted API. migrate-to-indexdb (localStorage → IndexedDB) writes new records using the same UID + local team model.
+
+- [#9135](https://github.com/scalar/scalar/pull/9135): feat: optimize layout for mobile
+  - Hide the document breadcrumb on small screens and surface workspace
+    switching from the menu instead, so the top bar stays uncluttered.
+  - Convert the document save / discard / pull / push / publish buttons to
+    header-button styling and only render the trailing divider when there
+    are actual cluster buttons next to it.
+  - Stack the address bar onto two rows on small screens so the URL and
+    the action cluster (copy / history / send) each get a full row.
+  - Hide the "Log in" affordance from the small-screen top bar (the menu
+    still owns it) and keep only the primary "Register" CTA there.
+  - Give the pre-request and post-response script editors proper vertical
+    padding so the help text no longer clips when it wraps.
+
+- [#9149](https://github.com/scalar/scalar/pull/9149): fix: keep splash until team loads so team workspace reloads stick
+- [#9179](https://github.com/scalar/scalar/pull/9179): fix: enable transparent Electron window to reduce resize flash
+
+  The desktop shell uses a dark-themed surface; Electron’s default backing color can show through briefly while the webview repaints during aggressive window resizing. A transparent window lets the renderer’s own background (CSS / theme) own what users see in those gaps.
+
+- [#9110](https://github.com/scalar/scalar/pull/9110): build: switch Monaco Vite plugin to ESM and align workers
+- [#9113](https://github.com/scalar/scalar/pull/9113): chore: move app files from client to scalar-app
+
 ## 1.0.9
 
 ### Patch Changes

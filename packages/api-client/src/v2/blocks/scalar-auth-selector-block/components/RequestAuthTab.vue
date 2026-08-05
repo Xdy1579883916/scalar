@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { ScalarMarkdownSummary } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarIconButton } from '@scalar/components/icon-button'
+import { useLoadingState } from '@scalar/components/loading'
+import { ScalarMarkdownSummary } from '@scalar/components/markdown'
+import { ScalarModal, useModal } from '@scalar/components/modal'
+import { ScalarIconGear } from '@scalar/icons'
+import { useToasts } from '@scalar/use-toasts'
 import type {
   SecretsApiKey,
   SecretsHttp,
@@ -9,11 +15,19 @@ import type {
   WorkspaceEventBus,
 } from '@scalar/workspace-store/events'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
-import type {
-  MergedSecuritySchemes,
-  SecuritySchemeObjectSecret,
+import {
+  getEnvironmentVariables,
+  isEncryptionSchemeType,
+  isSaslSchemeType,
+  type EncryptionObjectSecret,
+  type GssapiObjectSecret,
+  type MergedSecuritySchemes,
+  type SaslObjectSecret,
+  type SecuritySchemeObjectSecret,
+  type X509ObjectSecret,
 } from '@scalar/workspace-store/request-example'
 import type { XScalarEnvironment } from '@scalar/workspace-store/schemas/extensions/document/x-scalar-environments'
+import { getDocumentTypeLabel } from '@scalar/workspace-store/schemas/type-guards'
 import type {
   ApiKeyObject,
   SecurityRequirementObject,
@@ -21,7 +35,17 @@ import type {
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { capitalize, computed, ref } from 'vue'
 
-import { DataTableCell, DataTableRow } from '@/v2/components/data-table'
+import { refreshOauth2Token } from '@/v2/blocks/scalar-auth-selector-block/helpers/oauth'
+import {
+  runOAuth2Authorize,
+  storeOAuth2Tokens,
+} from '@/v2/blocks/scalar-auth-selector-block/helpers/run-oauth2-authorize'
+import { getOauth2AcquisitionTarget } from '@/v2/blocks/scalar-auth-selector-block/helpers/security-scheme'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableRow,
+} from '@/v2/components/data-table'
 
 import OAuth2, { type OAuth2Options } from './OAuth2.vue'
 import OpenIDConnect from './OpenIDConnect.vue'
@@ -42,6 +66,7 @@ const {
   server,
   eventBus,
   options,
+  documentType = 'openapi',
 } = defineProps<{
   /** Current environment configuration */
   environment: XScalarEnvironment
@@ -59,13 +84,26 @@ const {
   eventBus: WorkspaceEventBus
   /**  Any config options required for the OAuth2 flow */
   options?: OAuth2Options
+  /** Type of the document the schemes belong to, used to label the missing-type warning */
+  documentType?: 'openapi' | 'asyncapi'
 }>()
+
+/**
+ * Human-readable name of the document type.
+ * Used in the missing-type warning so it points at the correct document
+ * (e.g. "AsyncAPI") instead of always naming OpenAPI.
+ */
+const documentTypeLabel = computed<string>(() =>
+  getDocumentTypeLabel(documentType),
+)
 
 const emits = defineEmits<{
   (
     e: 'update:selectedScopes',
     payload: Omit<ApiReferenceEvents['auth:update:selected-scopes'], 'meta'>,
   ): void
+  (e: 'upsert:scope', payload: ApiReferenceEvents['auth:upsert:scopes']): void
+  (e: 'delete:scope', payload: ApiReferenceEvents['auth:delete:scopes']): void
 }>()
 
 /**
@@ -137,6 +175,48 @@ const generateLabel = (
 }
 
 /**
+ * Whether an API key scheme exposes an editable parameter name.
+ *
+ * OpenAPI `apiKey` and AsyncAPI `httpApiKey` (normalized to `apiKey`) name a query/header/cookie
+ * parameter, so the Name input is shown. AsyncAPI `apiKey` places the key in the broker `user` or
+ * `password` slot and has no parameter name, so the Name input is hidden and only the value is asked for.
+ */
+const apiKeyHasName = (scheme: { in?: string }): boolean =>
+  scheme.in !== 'user' && scheme.in !== 'password'
+
+/**
+ * SASL-style AsyncAPI broker schemes (`userPassword`, `plain`, `scramSha256`, `scramSha512`):
+ * they all authenticate with a username + password pair, so they share one form.
+ */
+const isSaslScheme = (
+  scheme: SecurityItem['scheme'],
+): scheme is SaslObjectSecret => isSaslSchemeType(scheme?.type)
+
+/** AsyncAPI encryption broker schemes: a single key value. */
+const isEncryptionScheme = (
+  scheme: SecurityItem['scheme'],
+): scheme is EncryptionObjectSecret => isEncryptionSchemeType(scheme?.type)
+
+/** AsyncAPI X509 broker scheme: a client certificate + private key pair (PEM). */
+const isX509Scheme = (
+  scheme: SecurityItem['scheme'],
+): scheme is X509ObjectSecret => scheme?.type === 'X509'
+
+/** AsyncAPI GSSAPI (Kerberos) broker scheme: the service name the client authenticates against. */
+const isGssapiScheme = (
+  scheme: SecurityItem['scheme'],
+): scheme is GssapiObjectSecret => scheme?.type === 'gssapi'
+
+/**
+ * The scheme's type when it is one we do not render inputs for (a type outside both the OpenAPI
+ * and AsyncAPI security scheme unions). Read through a helper so the fallback template branch,
+ * where the scheme type is narrowed to `never` after the supported cases, can still surface the type.
+ */
+const getUnsupportedSchemeType = (
+  scheme: SecurityItem['scheme'],
+): string | undefined => scheme?.type
+
+/**
  * Determines if an OAuth2 flow tab should be active.
  * The first flow is active by default if no flow is explicitly selected.
  */
@@ -164,6 +244,20 @@ const handleApiKeySecretsUpdate = (
     name,
   })
 
+/**
+ * AsyncAPI broker credentials (SASL, X509, encryption, GSSAPI) all persist through the same
+ * event; only the secret key and scheme type differ, so they share one handler. The caller passes
+ * a payload that already carries the narrowed scheme `type`.
+ */
+const handleBrokerSecretsUpdate = (
+  payload: ApiReferenceEvents['auth:update:security-scheme-secrets']['payload'],
+  name: string,
+): void =>
+  eventBus.emit('auth:update:security-scheme-secrets', {
+    payload,
+    name,
+  })
+
 const handleApiKeySecuritySchemeUpdate = (
   payload: Omit<Partial<ApiKeyObject>, 'type'>,
   name: string,
@@ -176,13 +270,29 @@ const handleApiKeySecuritySchemeUpdate = (
 /** Handles scope selection updates for OAuth2 */
 const handleScopesUpdate = (
   name: string,
-  event: { scopes: string[] },
+  event: { scopes?: string[]; scope?: string; selected?: boolean },
 ): void => {
   emits('update:selectedScopes', {
     id: Object.keys(selectedSecuritySchemas),
     name,
     ...event,
   })
+}
+
+/** Handles scope-definition upserts (add / rename / description change) */
+const handleScopeUpsert = (
+  name: string,
+  event: Omit<ApiReferenceEvents['auth:upsert:scopes'], 'name'>,
+): void => {
+  emits('upsert:scope', { ...event, name })
+}
+
+/** Handles scope-definition deletes */
+const handleScopeDelete = (
+  name: string,
+  event: Omit<ApiReferenceEvents['auth:delete:scopes'], 'name'>,
+): void => {
+  emits('delete:scope', { ...event, name })
 }
 
 /**
@@ -196,6 +306,106 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
   return isFlowActive(flowKey, index)
     ? `${baseClasses} ${activeClasses} ${isStatic ? 'opacity-100' : ''}`
     : baseClasses
+}
+
+/**
+ * OAuth2 token-acquisition target (an oauth2 scheme with an interactive grant) sourced from
+ * the merged schemes. When the active scheme is HTTP bearer, this powers the inline
+ * "Authorize via OAuth2" shortcut: the flow's bearer token is written onto the bearer scheme,
+ * so the panel never switches to oauth2.
+ *
+ * The shortcut is purely a convenience, so it is offered for any interactive oauth2 scheme —
+ * including one that is also independently selectable in the dropdown (e.g. Scalar Galaxy's
+ * `oAuth2`). Whether that oauth2 scheme is *hidden* from the dropdown is a separate decision made
+ * in the selector; here we only surface the shortcut.
+ */
+const oauth2Target = computed(() => getOauth2AcquisitionTarget(securitySchemes))
+
+/** Resolved oauth2 scheme object, for embedding its config form behind the gear. */
+const oauth2Scheme = computed(() =>
+  oauth2Target.value
+    ? getResolvedRef(securitySchemes[oauth2Target.value.name])
+    : undefined,
+)
+
+const acquisitionLoader = useLoadingState()
+const { toast } = useToasts()
+const configModal = useModal()
+/** Bearer scheme that opened the config modal, so its Authorize callback targets it. */
+const configBearerName = ref<string | undefined>()
+
+/** Runs the OAuth2 flow and writes the resulting bearer token onto the bearer scheme. */
+const handleAcquisitionAuthorize = async (
+  bearerName: string,
+): Promise<void> => {
+  const target = oauth2Target.value
+  if (!target || acquisitionLoader.isLoading) {
+    return
+  }
+  acquisitionLoader.start()
+  const [error] = await runOAuth2Authorize({
+    eventBus,
+    bearerSchemeName: bearerName,
+    oauth2Name: target.name,
+    flows: target.flows,
+    flowType: target.flowType,
+    scopes: target.scopes,
+    server,
+    proxyUrl,
+    environment,
+    options,
+  })
+  await acquisitionLoader.clear()
+  if (error) {
+    toast(error?.message ?? 'Failed to authorize', 'error')
+  }
+}
+
+/** Refreshes the OAuth2 token and rewrites it onto the bearer scheme. */
+const handleAcquisitionRefresh = async (bearerName: string): Promise<void> => {
+  const target = oauth2Target.value
+  // Only the authorization-code flow carries a refresh token; implicit can't be refreshed.
+  if (
+    !target ||
+    target.flowType !== 'authorizationCode' ||
+    acquisitionLoader.isLoading
+  ) {
+    return
+  }
+  acquisitionLoader.start()
+  const [error, tokens] = await refreshOauth2Token(
+    target.flows,
+    target.flowType,
+    proxyUrl,
+    server,
+    getEnvironmentVariables(environment),
+    options?.customFetch,
+  )
+  await acquisitionLoader.clear()
+  if (tokens?.accessToken) {
+    storeOAuth2Tokens(eventBus, {
+      bearerSchemeName: bearerName,
+      oauth2Name: target.name,
+      flowType: target.flowType,
+      tokens,
+    })
+  } else if (error) {
+    toast(error?.message ?? 'Failed to refresh', 'error')
+  }
+}
+
+const openAcquisitionConfig = (bearerName: string): void => {
+  configBearerName.value = bearerName
+  configModal.show()
+}
+
+/** Closes the config modal and runs Authorize against the bearer scheme that opened it. */
+const handleConfigAuthorize = (): void => {
+  const bearerName = configBearerName.value
+  configModal.hide()
+  if (bearerName) {
+    void handleAcquisitionAuthorize(bearerName)
+  }
 }
 </script>
 <template>
@@ -250,6 +460,40 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
         </RequestAuthDataTableInput>
       </DataTableRow>
 
+      <!-- OAuth2 token-acquisition shortcut (shown when an interactive oauth2 flow exists) -->
+      <DataTableRow v-if="scheme.scheme === 'bearer' && oauth2Target">
+        <div class="flex h-8 items-center gap-2 border-t px-3">
+          <span class="text-c-3 mr-auto text-xs">Get a token</span>
+          <ScalarButton
+            class="p-0 px-2 py-0.5"
+            :loader="acquisitionLoader"
+            size="sm"
+            type="button"
+            variant="outlined"
+            @click="handleAcquisitionAuthorize(name)">
+            Authorize via {{ oauth2Target.name }}
+          </ScalarButton>
+          <ScalarButton
+            v-if="
+              scheme['x-scalar-secret-token'] &&
+              oauth2Target.flowType === 'authorizationCode'
+            "
+            class="p-0 px-2 py-0.5"
+            :disabled="acquisitionLoader.isLoading"
+            size="sm"
+            type="button"
+            variant="outlined"
+            @click="handleAcquisitionRefresh(name)">
+            Refresh
+          </ScalarButton>
+          <ScalarIconButton
+            :icon="ScalarIconGear"
+            :label="`Configure ${oauth2Target.name}`"
+            size="xs"
+            @click="openAcquisitionConfig(name)" />
+        </div>
+      </DataTableRow>
+
       <!-- HTTP Basic Authentication -->
       <template v-else-if="scheme?.scheme === 'basic'">
         <DataTableRow>
@@ -284,7 +528,7 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
 
     <!-- API Key Authentication -->
     <template v-else-if="scheme?.type === 'apiKey'">
-      <DataTableRow>
+      <DataTableRow v-if="apiKeyHasName(scheme)">
         <RequestAuthDataTableInput
           :containerClass="getStaticBorderClass()"
           :environment
@@ -298,6 +542,9 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
       </DataTableRow>
       <DataTableRow>
         <RequestAuthDataTableInput
+          :containerClass="
+            apiKeyHasName(scheme) ? undefined : getStaticBorderClass()
+          "
           :environment
           :modelValue="scheme['x-scalar-secret-token']"
           placeholder="QUxMIFlPVVIgQkFTRSBBUkUgQkVMT05HIFRPIFVT"
@@ -320,6 +567,7 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
           scheme?.type === 'openIdConnect' &&
           !Object.keys(scheme.flows ?? {}).length
         "
+        :customFetch="options?.customFetch"
         :environment
         :eventBus
         :getStaticBorderClass
@@ -359,16 +607,192 @@ const getFlowTabClasses = (flowKey: string, index: number): string => {
           :selectedScopes="scopes"
           :server
           :type="key"
-          @update:selectedScopes="(event) => handleScopesUpdate(name, event)" />
+          @delete:scope="(event) => handleScopeDelete(name, event)"
+          @update:selectedScopes="(event) => handleScopesUpdate(name, event)"
+          @upsert:scope="(event) => handleScopeUpsert(name, event)" />
       </template>
     </template>
+
+    <!-- SASL broker authentication (userPassword, plain, scramSha256, scramSha512) -->
+    <template v-else-if="isSaslScheme(scheme)">
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          class="text-c-2"
+          :containerClass="getStaticBorderClass()"
+          :environment
+          :modelValue="scheme['x-scalar-secret-username']"
+          placeholder="janedoe"
+          required
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                { 'type': scheme.type, 'x-scalar-secret-username': v },
+                name,
+              )
+          ">
+          Username
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          :environment
+          :modelValue="scheme['x-scalar-secret-password']"
+          placeholder="********"
+          type="password"
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                { 'type': scheme.type, 'x-scalar-secret-password': v },
+                name,
+              )
+          ">
+          Password
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+    </template>
+
+    <!-- X509 client certificate authentication -->
+    <template v-else-if="isX509Scheme(scheme)">
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          :containerClass="getStaticBorderClass()"
+          :environment
+          :modelValue="scheme['x-scalar-secret-client-certificate']"
+          placeholder="-----BEGIN CERTIFICATE-----"
+          type="password"
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                {
+                  'type': scheme.type,
+                  'x-scalar-secret-client-certificate': v,
+                },
+                name,
+              )
+          ">
+          Client Certificate
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          :environment
+          :modelValue="scheme['x-scalar-secret-private-key']"
+          placeholder="-----BEGIN PRIVATE KEY-----"
+          type="password"
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                { 'type': scheme.type, 'x-scalar-secret-private-key': v },
+                name,
+              )
+          ">
+          Private Key
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+    </template>
+
+    <!-- Symmetric / asymmetric encryption key -->
+    <template v-else-if="isEncryptionScheme(scheme)">
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          :containerClass="getStaticBorderClass()"
+          :environment
+          :modelValue="scheme['x-scalar-secret-token']"
+          placeholder="********"
+          type="password"
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                { 'type': scheme.type, 'x-scalar-secret-token': v },
+                name,
+              )
+          ">
+          Key
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+    </template>
+
+    <!-- GSSAPI (Kerberos) authentication -->
+    <template v-else-if="isGssapiScheme(scheme)">
+      <DataTableRow>
+        <RequestAuthDataTableInput
+          :containerClass="getStaticBorderClass()"
+          :environment
+          :modelValue="scheme['x-scalar-secret-service-name']"
+          placeholder="kafka"
+          @update:modelValue="
+            (v) =>
+              handleBrokerSecretsUpdate(
+                { 'type': scheme.type, 'x-scalar-secret-service-name': v },
+                name,
+              )
+          ">
+          Service Name
+        </RequestAuthDataTableInput>
+      </DataTableRow>
+    </template>
+
+    <!-- Scheme has a type we do not render inputs for -->
+    <div
+      v-else-if="getUnsupportedSchemeType(scheme)"
+      class="text-c-3 flex items-center justify-center border-t p-4 px-4 text-center text-xs text-balance">
+      The <code>{{ getUnsupportedSchemeType(scheme) }}</code> security scheme
+      type is not supported yet.
+    </div>
 
     <!-- Scheme is missing type -->
     <div
       v-else
       class="text-c-3 flex items-center justify-center border-t p-4 px-4 text-center text-xs text-balance">
-      The security scheme is missing a type, please double check your OpenAPI
-      document or Authentication Configuration
+      The security scheme is missing a type, please double check your
+      {{ documentTypeLabel }} document or Authentication Configuration
     </div>
   </template>
+
+  <!-- OAuth2 configuration modal (opened from the bearer scheme's gear) -->
+  <ScalarModal
+    v-if="oauth2Target && oauth2Scheme"
+    :state="configModal"
+    size="sm"
+    :title="`Configure ${oauth2Target.name}`">
+    <DataTable
+      :columns="['']"
+      presentational>
+      <OAuth2
+        hideActions
+        :environment
+        :eventBus
+        :flows="oauth2Target.flows"
+        :name="oauth2Target.name"
+        :options
+        :proxyUrl
+        :scheme="oauth2Scheme"
+        :selectedScopes="oauth2Target.scopes"
+        :server
+        :type="oauth2Target.flowType"
+        @delete:scope="(event) => handleScopeDelete(oauth2Target!.name, event)"
+        @update:selectedScopes="
+          (event) => handleScopesUpdate(oauth2Target!.name, event)
+        "
+        @upsert:scope="
+          (event) => handleScopeUpsert(oauth2Target!.name, event)
+        " />
+    </DataTable>
+    <div class="flex h-8 items-center justify-end gap-2 border-t">
+      <ScalarButton
+        class="p-0 px-2 py-0.5"
+        size="sm"
+        variant="outlined"
+        @click="configModal.hide()">
+        Cancel
+      </ScalarButton>
+      <ScalarButton
+        class="p-0 px-2 py-0.5"
+        :loader="acquisitionLoader"
+        size="sm"
+        @click="handleConfigAuthorize">
+        Authorize
+      </ScalarButton>
+    </div>
+  </ScalarModal>
 </template>

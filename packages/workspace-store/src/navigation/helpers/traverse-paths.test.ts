@@ -263,6 +263,186 @@ describe('traversePaths', () => {
     expect(tagsMap.get('Ignored')?.entries).toEqual([])
   })
 
+  it('skips $ref-wrapped operations with x-internal sibling extension', () => {
+    // The wrapper has x-internal as a sibling to $ref. The resolved target does not.
+    // See: https://github.com/scalar/scalar/issues/9114
+    const document = createDocument()
+    document.paths = {
+      '/hidden': {
+        get: {
+          'x-internal': true,
+          $ref: '#/components/operations/HiddenOp',
+          // biome-ignore lint/suspicious/noExplicitAny: simulating bundled $ref-value
+          '$ref-value': {
+            tags: ['Hidden'],
+            summary: 'Should not show',
+            operationId: 'hiddenOp',
+          },
+        } as any,
+      },
+    }
+
+    const tagsMap: TagsMap = new Map([
+      ['Hidden', { id: 'tag/hidden', parentId: 'doc-1', tag: { name: 'Hidden' }, entries: [] }],
+    ])
+
+    traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+    expect(tagsMap.get('Hidden')?.entries).toEqual([])
+  })
+
+  it('skips $ref-wrapped operations with x-scalar-ignore sibling extension', () => {
+    const document = createDocument()
+    document.paths = {
+      '/ignored': {
+        get: {
+          'x-scalar-ignore': true,
+          $ref: '#/components/operations/IgnoredOp',
+          // biome-ignore lint/suspicious/noExplicitAny: simulating bundled $ref-value
+          '$ref-value': {
+            tags: ['Ignored'],
+            summary: 'Should not show',
+            operationId: 'ignoredOp',
+          },
+        } as any,
+      },
+    }
+
+    const tagsMap: TagsMap = new Map([
+      ['Ignored', { id: 'tag/ignored', parentId: 'doc-1', tag: { name: 'Ignored' }, entries: [] }],
+    ])
+
+    traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+    expect(tagsMap.get('Ignored')?.entries).toEqual([])
+  })
+
+  it('traverses operations when the path item is a $ref', () => {
+    const document = createDocument()
+    document.paths = {
+      '/users': {
+        $ref: '#/components/pathItems/UsersPath',
+        // biome-ignore lint/suspicious/noExplicitAny: simulating bundled $ref-value
+        '$ref-value': {
+          get: {
+            tags: ['Users'],
+            summary: 'Get users',
+            operationId: 'getUsers',
+          },
+          post: {
+            tags: ['Users'],
+            summary: 'Create user',
+            operationId: 'createUser',
+          },
+        },
+      } as any,
+    }
+
+    const tagsMap: TagsMap = new Map([
+      [
+        'Users',
+        { id: 'tag/users', parentId: 'doc-1', tag: { name: 'Users', description: 'User operations' }, entries: [] },
+      ],
+    ])
+
+    const result = traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+
+    expect(tagsMap.get('Users')?.entries).toStrictEqual([
+      {
+        id: 'GET-/users',
+        title: 'Get users',
+        path: '/users',
+        method: 'get',
+        ref: '#/paths/~1users/get',
+        type: 'operation',
+        isDeprecated: false,
+        children: undefined,
+      },
+      {
+        id: 'POST-/users',
+        title: 'Create user',
+        path: '/users',
+        method: 'post',
+        ref: '#/paths/~1users/post',
+        type: 'operation',
+        isDeprecated: false,
+        children: undefined,
+      },
+    ])
+    expect(result.untaggedOperations).toStrictEqual([])
+  })
+
+  it('collects untagged operations from a $ref path item', () => {
+    const document = createDocument()
+    document.paths = {
+      '/health': {
+        $ref: '#/components/pathItems/HealthPath',
+        // biome-ignore lint/suspicious/noExplicitAny: simulating bundled $ref-value
+        '$ref-value': {
+          get: {
+            summary: 'Health check',
+            operationId: 'healthCheck',
+          },
+        },
+      } as any,
+    }
+
+    const tagsMap: TagsMap = new Map()
+
+    const result = traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+
+    expect(result.untaggedOperations).toStrictEqual([
+      {
+        id: 'GET-/health',
+        title: 'Health check',
+        path: '/health',
+        method: 'get',
+        ref: '#/paths/~1health/get',
+        type: 'operation',
+        isDeprecated: false,
+        children: undefined,
+      },
+    ])
+  })
+
   it('should handle operations with missing summary', () => {
     const document = createDocument()
     document.paths = {
@@ -350,5 +530,98 @@ describe('traversePaths', () => {
       },
     })
     expect(tagsMap.get('Test')?.entries[0]?.title).toBe('/test')
+  })
+
+  it("uses the path when operationTitleSource is 'path' even if a summary is set", () => {
+    const document = createDocument()
+    document.paths = {
+      '/2fa/passkey/get-get-args': {
+        get: {
+          tags: ['Passkey'],
+          summary: 'Test passkey',
+        },
+      },
+    }
+
+    const tagsMap: TagsMap = new Map([
+      ['Passkey', { id: 'tag/passkey', parentId: 'doc-1', tag: { name: 'Passkey' }, entries: [] }],
+    ])
+
+    const result = traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      operationTitleSource: 'path',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+
+    expect(tagsMap.get('Passkey')?.entries[0]?.title).toBe('/2fa/passkey/get-get-args')
+    expect(result.untaggedOperations).toHaveLength(0)
+  })
+
+  it("falls back to the path when operationTitleSource is 'path' and there is no summary", () => {
+    const document = createDocument()
+    document.paths = {
+      '/widgets': {
+        get: {
+          tags: ['Widget'],
+        },
+      },
+    }
+
+    const tagsMap: TagsMap = new Map([
+      ['Widget', { id: 'tag/widget', parentId: 'doc-1', tag: { name: 'Widget' }, entries: [] }],
+    ])
+
+    traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      operationTitleSource: 'path',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+
+    expect(tagsMap.get('Widget')?.entries[0]?.title).toBe('/widgets')
+  })
+
+  it("uses the summary when operationTitleSource is 'summary' (default behavior preserved)", () => {
+    const document = createDocument()
+    document.paths = {
+      '/widgets': {
+        get: {
+          tags: ['Widget'],
+          summary: 'List widgets',
+        },
+      },
+    }
+
+    const tagsMap: TagsMap = new Map([
+      ['Widget', { id: 'tag/widget', parentId: 'doc-1', tag: { name: 'Widget' }, entries: [] }],
+    ])
+
+    traversePaths({
+      document,
+      tagsMap,
+      documentId: 'doc-1',
+      operationTitleSource: 'summary',
+      generateId: (props) => {
+        if (props.type === 'operation') {
+          return `${props.method?.toUpperCase()}-${props.path}`
+        }
+        return 'unknown-id'
+      },
+    })
+
+    expect(tagsMap.get('Widget')?.entries[0]?.title).toBe('List widgets')
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ScalarSearchResultItem } from '@scalar/components'
+import { ScalarSearchResultItem } from '@scalar/components/search-results'
 import {
   ScalarIconBracketsCurly,
   ScalarIconTag,
@@ -8,15 +8,23 @@ import {
 } from '@scalar/icons'
 import type { ScalarIconComponent } from '@scalar/icons/types'
 import { HttpMethod } from '@scalar/sidebar'
+import {
+  DEFAULT_MODELS_SECTION_LABEL,
+  type ModelsSectionLabel,
+} from '@scalar/types/api-reference'
 import type { FuseResult } from 'fuse.js'
+import { computed } from 'vue'
 
+import { useLocalization } from '@/features/localization'
 import type { EntryType, FuseData } from '@/features/Search/types'
 
-defineProps<{
+const { modelsSectionLabel = DEFAULT_MODELS_SECTION_LABEL } = defineProps<{
   id: string
   isSelected: boolean
   result: FuseResult<FuseData>
+  modelsSectionLabel?: ModelsSectionLabel
 }>()
+const { translate } = useLocalization()
 
 const ENTRY_ICONS: { [x in EntryType]: ScalarIconComponent } = {
   heading: ScalarIconTextAlignLeft,
@@ -26,13 +34,13 @@ const ENTRY_ICONS: { [x in EntryType]: ScalarIconComponent } = {
   webhook: ScalarIconTerminalWindow,
 }
 
-const ENTRY_LABELS: { [x in EntryType]: string } = {
-  heading: 'Heading',
-  operation: 'Operation',
-  tag: 'Tag',
-  model: 'Model',
-  webhook: 'Webhook',
-}
+const entryLabels = computed((): { [x in EntryType]: string } => ({
+  heading: translate('search.entryHeading'),
+  operation: translate('search.entryOperation'),
+  tag: translate('search.entryTag'),
+  model: modelsSectionLabel,
+  webhook: translate('search.entryWebhook'),
+}))
 </script>
 
 <template>
@@ -47,13 +55,13 @@ const ENTRY_LABELS: { [x in EntryType]: string } = {
           result.item.entry.isDeprecated,
       }">
       <span class="sr-only">
-        {{ ENTRY_LABELS[result.item.type] }}:&nbsp;
+        {{ entryLabels[result.item.type] }}:&nbsp;
         <template
           v-if="
             result.item.entry.type === 'operation' &&
             result.item.entry.isDeprecated
           ">
-          (Deprecated)&nbsp;
+          ({{ translate('common.deprecated') }})&nbsp;
         </template>
       </span>
       {{ result.item.title }}
@@ -72,17 +80,18 @@ const ENTRY_LABELS: { [x in EntryType]: string } = {
             aria-hidden="true"
             :method="result.item.method ?? 'get'" />
           <span class="sr-only">
-            HTTP Method: {{ result.item.method ?? 'get' }}
+            {{ translate('common.httpMethod') }}:
+            {{ result.item.method ?? 'get' }}
           </span>
         </template>
-        <span class="sr-only">Path:&nbsp;</span>
+        <span class="sr-only">{{ translate('common.path') }}:&nbsp;</span>
         {{ result.item.path }}
       </span>
     </template>
     <template
       v-else-if="result.item.description"
       #description>
-      <span class="sr-only">Description:&nbsp;</span>
+      <span class="sr-only">{{ translate('common.description') }}:&nbsp;</span>
       {{ result.item.description }}
     </template>
   </ScalarSearchResultItem>

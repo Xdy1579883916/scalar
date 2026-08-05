@@ -1,3 +1,5 @@
+import { DEFAULT_MODELS_SECTION_LABEL, type ModelsSectionLabel } from '@scalar/types/api-reference'
+import type { AsyncApiDocument } from '@scalar/types/asyncapi/3.1'
 import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import type { FuseResult } from 'fuse.js'
 import { type MaybeRefOrGetter, computed, ref, toValue } from 'vue'
@@ -9,10 +11,31 @@ import type { FuseData } from '../types'
 const MAX_SEARCH_RESULTS = 25
 
 /**
- * Creates the search index from an OpenAPI document.
+ * Creates the search index from an OpenAPI or AsyncAPI document.
  */
-export function useSearchIndex(document: MaybeRefOrGetter<OpenApiDocument | undefined>) {
-  const searchIndex = computed<FuseData[]>(() => createSearchIndex(toValue(document)))
+export function useSearchIndex(
+  document: MaybeRefOrGetter<OpenApiDocument | AsyncApiDocument | undefined>,
+  modelsSectionLabel: MaybeRefOrGetter<ModelsSectionLabel | undefined> = DEFAULT_MODELS_SECTION_LABEL,
+  labels: MaybeRefOrGetter<{
+    heading: string
+    tagGroup: string
+    webhook: string
+    webhooks: string
+    introduction: string
+  }> = {
+    heading: 'Heading',
+    tagGroup: 'Tag Group',
+    webhook: 'Webhook',
+    webhooks: 'Webhooks',
+    introduction: 'Introduction',
+  },
+) {
+  const searchIndex = computed<FuseData[]>(() =>
+    createSearchIndex(toValue(document), {
+      labels: toValue(labels),
+      modelsSectionLabel: toValue(modelsSectionLabel) ?? DEFAULT_MODELS_SECTION_LABEL,
+    }),
+  )
 
   /** When the document changes we replace the search index */
   const fuse = computed(() => {

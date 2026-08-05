@@ -1,17 +1,17 @@
 import { getValueAtPath } from '@scalar/helpers/object/get-value-at-path'
+import { isObject } from '@scalar/helpers/object/is-object'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
-import { deSerializeParameter, getExample } from '@scalar/workspace-store/request-example'
+import { deSerializeParameter, getExample, isParamDisabled } from '@scalar/workspace-store/request-example'
 import type {
   ParameterObject,
   ParameterWithSchemaObject,
   ReferenceType,
   SchemaObject,
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
-import { isObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/type-guards'
+import { isArraySchema, isObjectSchema } from '@scalar/workspace-store/schemas/v3.1/strict/type-guards'
 
 import type { TableRow } from '../components/RequestTableRow.vue'
 import { getParameterSchema } from './get-parameter-schema'
-import { isParamDisabled } from './is-param-disabled'
 
 type ParameterWithRequiredSchema = ParameterWithSchemaObject & {
   schema: ReferenceType<SchemaObject>
@@ -112,6 +112,22 @@ const toTableRow = ({
   sourceParameterValuePath,
 })
 
+/**
+ * Builds the row name for an expanded property at a given value path. deepObject rows mirror the
+ * wire format (`parent[a][b]`); form-style explode uses the bare top-level key.
+ */
+const getExpandedRowName = (parameter: ParameterObject, path: string[], mode: ExpansionMode): string =>
+  mode === 'deepObject' ? `${parameter.name}${path.map((segment) => `[${segment}]`).join('')}` : (path[0] ?? '')
+
+/**
+ * Appends the display-only trailing `[]` to deepObject array leaves so the name matches the
+ * serialized `parent[ids][]=1&parent[ids][]=2` form. The bracket is display-only — the row's
+ * `sourceParameterValuePath` stays bracket-free. It also lets write-back recognize the leaf as an
+ * array even on renamed and unmapped rows, which carry no schema.
+ */
+const withArrayBracket = (name: string, mode: ExpansionMode, isArray: boolean): string =>
+  mode === 'deepObject' && isArray ? `${name}[]` : name
+
 /** Build the single-row representation used when a parameter is not expanded. */
 const toSingleParameterRow = (
   parameter: ParameterObject,
@@ -149,6 +165,8 @@ const getExpandedPropertyRows = ({
   mode,
   isDisabled,
   hiddenValuePaths,
+  renamedValuePaths,
+  renameTargetPaths,
 }: {
   parameter: ParameterObject
   schema: Extract<SchemaObject, { type: 'object' }>
@@ -158,6 +176,8 @@ const getExpandedPropertyRows = ({
   mode: ExpansionMode
   isDisabled: boolean
   hiddenValuePaths: ReadonlySet<string>
+  renamedValuePaths: ReadonlyMap<string, string[]>
+  renameTargetPaths: ReadonlySet<string>
 }): TableRow[] => {
   if (!schema.properties) {
     return []
@@ -174,7 +194,41 @@ const getExpandedPropertyRows = ({
     const path = [...pathPrefix, propertyName]
     const name = namePrefix ? `${namePrefix}[${propertyName}]` : propertyName
 
-    if (hiddenValuePaths.has(toPathKey(path))) {
+    // When this property was renamed, the value lives at the typed key instead of the schema path.
+    // Keep the row in its original slot so it does not jump to the end of the table.
+    const renamedTo = renamedValuePaths.get(toPathKey(path))
+    const effectivePath = renamedTo ?? path
+
+    if (hiddenValuePaths.has(toPathKey(effectivePath))) {
+      return []
+    }
+
+    if (renamedTo) {
+      // The value move is debounced, so until it lands the value still sits at the old schema path.
+      // Fall back to it so the renamed row shows its value immediately instead of flickering empty.
+      const renamedValue = getValueAtPath(value, renamedTo)
+      const effectiveValue = renamedValue === undefined ? getValueAtPath(value, path) : renamedValue
+
+      return [
+        toTableRow({
+          parameter,
+          // The renamed key carries no schema, so the value's array-ness drives the `[]` marker.
+          name: withArrayBracket(getExpandedRowName(parameter, renamedTo, mode), mode, Array.isArray(effectiveValue)),
+          value: effectiveValue,
+          description: parameter.description,
+          // The renamed key no longer maps to the schema property, so it carries no schema.
+          schema: undefined,
+          isRequired: false,
+          isDisabled,
+          sourceParameterValuePath: renamedTo,
+        }),
+      ]
+    }
+
+    // Another property was renamed onto this path (for example "a" renamed to an existing "b").
+    // The renamed row already occupies this slot, so skip the schema-derived row to avoid rendering
+    // two rows for the same value path.
+    if (renameTargetPaths.has(toPathKey(path))) {
       return []
     }
 
@@ -193,14 +247,23 @@ const getExpandedPropertyRows = ({
         mode,
         isDisabled,
         hiddenValuePaths,
+        renamedValuePaths,
+        renameTargetPaths,
       })
     }
+
+    const leafValue = getValueAtPath(value, path)
+
+    // deepObject array values serialize with the trailing-bracket convention
+    // (filter[ids][]=1&filter[ids][]=2), so mirror that in the displayed name. We base this on the
+    // resolved value too, since the schema can be a composition (anyOf) that hides the array type.
+    const displayName = withArrayBracket(name, mode, isArraySchema(resolvedPropertySchema) || Array.isArray(leafValue))
 
     return [
       toTableRow({
         parameter,
-        name,
-        value: getValueAtPath(value, path),
+        name: displayName,
+        value: leafValue,
         description: resolvedPropertySchema.description ?? parameter.description,
         schema: resolvedPropertySchema,
         isRequired: requiredProperties.has(propertyName),
@@ -209,6 +272,83 @@ const getExpandedPropertyRows = ({
       }),
     ]
   })
+}
+
+/**
+ * Collects the leaf paths of an object value. In `form` mode only the top-level keys are leaves
+ * (form-style explode does not flatten nested objects); in `deepObject` mode we recurse into nested
+ * objects, mirroring how the rows and serialization are built.
+ */
+const collectValueLeafPaths = (value: unknown, mode: ExpansionMode): string[][] => {
+  if (!isObject(value)) {
+    return []
+  }
+
+  const paths: string[][] = []
+
+  const walk = (node: Record<string, unknown>, prefix: string[]): void => {
+    for (const [key, val] of Object.entries(node)) {
+      const path = [...prefix, key]
+
+      if (mode === 'deepObject' && isObject(val)) {
+        walk(val, path)
+      } else {
+        paths.push(path)
+      }
+    }
+  }
+
+  walk(value, [])
+
+  return paths
+}
+
+/**
+ * Builds rows for value paths that the schema does not describe. This keeps user-edited keys (for
+ * example a property that was renamed in the table) visible instead of snapping back to the
+ * schema-derived rows on the next render.
+ */
+const getUnmappedValueRows = ({
+  parameter,
+  value,
+  schemaRows,
+  mode,
+  isDisabled,
+  renamedValuePaths,
+}: {
+  parameter: ParameterObject
+  value: unknown
+  schemaRows: TableRow[]
+  mode: ExpansionMode
+  isDisabled: boolean
+  renamedValuePaths: ReadonlyMap<string, string[]>
+}): TableRow[] => {
+  // Skip the renamed-away source paths too: the value move is debounced, so the old key lingers in
+  // the value for a moment and would otherwise flash as a duplicate row next to the renamed one.
+  const seen = new Set([
+    ...schemaRows.map((row) => toPathKey(row.sourceParameterValuePath ?? [])),
+    ...renamedValuePaths.keys(),
+  ])
+
+  // These rows always render: a key that carries a value should stay visible. The hidden-path set
+  // only suppresses empty schema suggestions, so it is intentionally not applied here.
+  return collectValueLeafPaths(value, mode)
+    .filter((path) => !seen.has(toPathKey(path)))
+    .map((path) => {
+      const leafValue = getValueAtPath(value, path)
+
+      return toTableRow({
+        parameter,
+        // No schema describes these rows, so the value's array-ness drives the `[]` marker.
+        name: withArrayBracket(getExpandedRowName(parameter, path, mode), mode, Array.isArray(leafValue)),
+        value: leafValue,
+        description: parameter.description,
+        schema: undefined,
+        isRequired: false,
+        isDisabled,
+        sourceParameterValuePath: path,
+      })
+    })
 }
 
 /**
@@ -222,7 +362,10 @@ const getExpandedPropertyRows = ({
 export const createParameterRows = (
   parameter: ParameterObject,
   exampleKey: string,
-  options: { hiddenValuePaths?: readonly string[][] } = {},
+  options: {
+    hiddenValuePaths?: readonly string[][]
+    renamedValuePaths?: readonly { from: string[]; to: string[] }[]
+  } = {},
 ): TableRow[] => {
   const example = getExample(parameter, exampleKey, undefined)
   const isDisabled = isParamDisabled(parameter, example)
@@ -244,6 +387,9 @@ export const createParameterRows = (
   }
 
   const hiddenValuePaths = new Set(options.hiddenValuePaths?.map(toPathKey) ?? [])
+  const renamedValuePaths = new Map((options.renamedValuePaths ?? []).map(({ from, to }) => [toPathKey(from), to]))
+  // Paths a property was renamed onto, used to suppress the colliding schema-derived row.
+  const renameTargetPaths = new Set((options.renamedValuePaths ?? []).map(({ to }) => toPathKey(to)))
 
   const rows = getExpandedPropertyRows({
     parameter,
@@ -255,7 +401,20 @@ export const createParameterRows = (
     mode,
     isDisabled,
     hiddenValuePaths,
+    renamedValuePaths,
+    renameTargetPaths,
   })
 
-  return rows
+  // Surface keys present in the value but not in the schema (for example a renamed property) so the
+  // edited key keeps showing up instead of snapping back to the schema-derived rows.
+  const unmappedRows = getUnmappedValueRows({
+    parameter,
+    value,
+    schemaRows: rows,
+    mode,
+    isDisabled,
+    renamedValuePaths,
+  })
+
+  return [...rows, ...unmappedRows]
 }

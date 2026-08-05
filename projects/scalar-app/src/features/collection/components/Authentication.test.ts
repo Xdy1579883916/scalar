@@ -3,8 +3,8 @@ import type { HttpMethod } from '@scalar/helpers/http/http-methods'
 import { createWorkspaceStore } from '@scalar/workspace-store/client'
 import { createWorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { MergedSecuritySchemes } from '@scalar/workspace-store/request-example'
-import type { WorkspaceDocument } from '@scalar/workspace-store/schemas'
 import type { XScalarEnvironment } from '@scalar/workspace-store/schemas/extensions/document/x-scalar-environments'
+import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
@@ -51,7 +51,7 @@ const baseDocument = {
       },
     },
   },
-} satisfies WorkspaceDocument
+} satisfies OpenApiDocument
 
 const baseEnvironment = {
   description: 'Default environment',
@@ -76,11 +76,12 @@ const defaultProps = {
 
 const mountWithProps = (
   custom: Partial<{
-    document: WorkspaceDocument | null
+    document: OpenApiDocument | null
     environment: typeof baseEnvironment
     collectionType: 'document' | 'operation'
     path: string
     method: string
+    options: Record<string, unknown>
   }> = {},
 ) => {
   const document = custom.document ?? baseDocument
@@ -108,6 +109,7 @@ const mountWithProps = (
         collectionType: custom.collectionType ?? 'document',
         path: custom.path,
         method: (custom.method ?? 'get') as HttpMethod | undefined,
+        options: custom.options,
       },
     }),
     eventBus,
@@ -179,6 +181,49 @@ describe('document collection', () => {
     })
   })
 
+  it('forwards customFetch from route options into the AuthSelector options', () => {
+    const customFetch = vi.fn()
+    const { wrapper } = mountWithProps({
+      collectionType: 'document',
+      options: { customFetch, oauth2RedirectUri: 'https://example.com/callback' },
+    })
+
+    const authSelector = wrapper.findComponent(AuthSelector)
+    expect(authSelector.props('options')).toEqual({
+      customFetch,
+      oauth2RedirectUri: 'https://example.com/callback',
+    })
+  })
+
+  it('forwards captureOAuth2Callback from route options into the AuthSelector options', () => {
+    const captureOAuth2Callback = vi.fn()
+    const { wrapper } = mountWithProps({
+      collectionType: 'document',
+      options: { captureOAuth2Callback, oauth2RedirectUri: 'http://127.0.0.1' },
+    })
+
+    const authSelector = wrapper.findComponent(AuthSelector)
+    expect(authSelector.props('options')?.captureOAuth2Callback).toBe(captureOAuth2Callback)
+  })
+
+  it('forwards customFetch even without an oauth2RedirectUri', () => {
+    const customFetch = vi.fn()
+    const { wrapper } = mountWithProps({
+      collectionType: 'document',
+      options: { customFetch },
+    })
+
+    const authSelector = wrapper.findComponent(AuthSelector)
+    expect(authSelector.props('options')?.customFetch).toBe(customFetch)
+  })
+
+  it('leaves AuthSelector options undefined when no relevant overrides are set', () => {
+    const { wrapper } = mountWithProps({ collectionType: 'document' })
+
+    const authSelector = wrapper.findComponent(AuthSelector)
+    expect(authSelector.props('options')).toBeUndefined()
+  })
+
   it('handles missing security and securitySchemes gracefully', () => {
     const { wrapper } = mountWithProps({
       collectionType: 'document',
@@ -186,7 +231,7 @@ describe('document collection', () => {
         ...baseDocument,
         security: undefined,
         components: undefined,
-      } as WorkspaceDocument,
+      } as OpenApiDocument,
     })
 
     const authSelector = wrapper.findComponent(AuthSelector)

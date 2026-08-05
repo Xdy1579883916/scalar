@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ScalarButton, ScalarTooltip } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarTooltip } from '@scalar/components/tooltip'
 import type {
   ApiReferenceEvents,
   WorkspaceEventBus,
@@ -10,7 +11,7 @@ import { computed } from 'vue'
 import { CollapsibleSection } from '@/v2/components/layout'
 
 import RequestTable from './RequestTable.vue'
-import type { TableRow } from './RequestTableRow.vue'
+import type { TableRow, TableRowUpsertPayload } from './RequestTableRow.vue'
 
 const {
   rows,
@@ -36,7 +37,9 @@ const emit = defineEmits<{
   (
     e: 'upsert',
     index: number,
-    payload: ApiReferenceEvents['operation:upsert:parameter']['payload'],
+    payload: ApiReferenceEvents['operation:upsert:parameter']['payload'] & {
+      shouldRenameExpandedRow?: boolean
+    },
   ): void
   (e: 'delete', payload: { index: number }): void
   (e: 'deleteAll'): void
@@ -45,14 +48,7 @@ const emit = defineEmits<{
 const showTooltip = computed(() => rows.length > 1)
 
 /** Needed for type guard */
-const handleUpserRow = (
-  index: number,
-  payload: {
-    name: string
-    value: string | File | undefined
-    isDisabled: boolean
-  },
-) => {
+const handleUpserRow = (index: number, payload: TableRowUpsertPayload) => {
   const { value, ...rest } = payload
 
   // Type guard here as we cannot add files to params

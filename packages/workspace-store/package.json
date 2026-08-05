@@ -16,7 +16,7 @@
     "openapi",
     "scalar"
   ],
-  "version": "0.49.3",
+  "version": "0.56.0",
   "engines": {
     "node": ">=22"
   },
@@ -26,10 +26,15 @@
     "generate-openapi-types": "tsx ./scripts/generate-openapi-types.ts",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "types:check": "tsc --noEmit"
+    "types:check": "tsgo --noEmit"
   },
   "type": "module",
   "exports": {
+    "./channel-example": {
+      "import": "./dist/channel-example/index.js",
+      "types": "./dist/channel-example/index.d.ts",
+      "default": "./dist/channel-example/index.js"
+    },
     "./client": {
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts",
@@ -146,9 +151,11 @@
     "CHANGELOG.md"
   ],
   "dependencies": {
+    "@scalar/asyncapi-upgrader": "workspace:*",
     "@scalar/helpers": "workspace:*",
     "@scalar/json-magic": "workspace:*",
     "@scalar/openapi-upgrader": "workspace:*",
+    "@scalar/schemas": "workspace:*",
     "@scalar/snippetz": "workspace:*",
     "@scalar/typebox": "catalog:*",
     "@scalar/types": "workspace:*",

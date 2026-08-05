@@ -16,6 +16,13 @@ import { usePluginManager } from '@/plugins'
 describe('RenderPlugins', () => {
   const mockOptions = { theme: 'dark', layout: 'modern' }
 
+  /** Read-only auth accessor shared by the mocked plugin managers below. */
+  const mockAuthState = {
+    export: vi.fn().mockReturnValue({}),
+    getAuthSecrets: vi.fn(),
+    getAuthSelectedSchemas: vi.fn(),
+  }
+
   describe('rendering', () => {
     it('renders nothing when no components are registered', () => {
       vi.mocked(usePluginManager).mockReturnValue({
@@ -25,12 +32,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -56,12 +66,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -91,12 +104,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -131,12 +147,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -173,12 +192,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -220,12 +242,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -268,12 +293,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -310,12 +338,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -340,12 +371,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -370,16 +404,19 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
-      expect(getViewComponentsMock).toHaveBeenCalledWith('content.end')
+      expect(getViewComponentsMock).toHaveBeenCalledWith('content.end', 'my-doc')
       expect(getViewComponentsMock).toHaveBeenCalledTimes(1)
     })
 
@@ -393,6 +430,8 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       mount(RenderPlugins, {
@@ -400,10 +439,49 @@ describe('RenderPlugins', () => {
           // @ts-expect-error just for the test
           viewName: 'custom.view.name',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
-      expect(getViewComponentsMock).toHaveBeenCalledWith('custom.view.name')
+      expect(getViewComponentsMock).toHaveBeenCalledWith('custom.view.name', 'my-doc')
+    })
+  })
+
+  describe('navigation wiring', () => {
+    it('renders each view with its id so navigation can scroll to it', () => {
+      const TestComponent = {
+        name: 'TestComponent',
+        template: '<div class="test-component">Test</div>',
+        props: ['options'],
+      }
+
+      vi.mocked(usePluginManager).mockReturnValue({
+        getViewComponents: vi.fn().mockReturnValue([
+          {
+            id: 'my-doc/plugin-view/my-plugin/content.start/0',
+            component: TestComponent,
+            sidebar: { show: true, label: 'Getting Started' },
+          },
+        ]),
+        getSpecificationExtensions: vi.fn(),
+        notifyInit: vi.fn(),
+        notifyConfigChange: vi.fn(),
+        notifyDestroy: vi.fn(),
+        getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
+      })
+
+      const wrapper = mount(RenderPlugins, {
+        props: {
+          viewName: 'content.start',
+          options: mockOptions,
+          documentSlug: 'my-doc',
+        },
+      })
+
+      // The wrapper id mirrors the sidebar entry id so scroll navigation can find it
+      expect(wrapper.find('[id="my-doc/plugin-view/my-plugin/content.start/0"]').exists()).toBe(true)
     })
   })
 
@@ -421,12 +499,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 
@@ -448,12 +529,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: {},
+          documentSlug: 'my-doc',
         },
       })
 
@@ -476,12 +560,15 @@ describe('RenderPlugins', () => {
         notifyConfigChange: vi.fn(),
         notifyDestroy: vi.fn(),
         getApiClientPlugins: vi.fn().mockReturnValue([]),
+        getSidebarEntries: vi.fn().mockReturnValue([]),
+        getAuthState: vi.fn().mockReturnValue(mockAuthState),
       })
 
       const wrapper = mount(RenderPlugins, {
         props: {
           viewName: 'content.end',
           options: mockOptions,
+          documentSlug: 'my-doc',
         },
       })
 

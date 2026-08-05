@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ScalarButton } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
 import { ScalarIconArrowRight } from '@scalar/icons'
 import {
   getActiveEnvironment,
   getSelectedServer,
   getServers,
 } from '@scalar/workspace-store/request-example'
+import { isOpenApiDocument } from '@scalar/workspace-store/schemas/type-guards'
 import type { ToolUIPart } from 'ai'
 import { computed, type Ref } from 'vue'
 
@@ -30,7 +31,8 @@ const document = computed(() => {
     return
   }
 
-  return workspaceStore.workspace.documents[documentName.value]
+  const doc = workspaceStore.workspace.documents[documentName.value]
+  return isOpenApiDocument(doc) ? doc : undefined
 })
 
 const environment = computed(() => {

@@ -1,5 +1,167 @@
 # @scalar/components
 
+## 0.27.10
+
+### Patch Changes
+
+- [#9782](https://github.com/scalar/scalar/pull/9782): Fix the tooltip rendering with a dark background in light mode. The light-mode tooltip tokens were hard-coded to a dark fill with light text, so the tooltip stayed black regardless of the active color mode. They now derive from `--scalar-background-1` and `--scalar-color-1`, so the tooltip follows the theme in both modes.
+
+  The tooltip surface is also polished to match the rest of the system: a standard hairline border and base shadow in both color modes (replacing the dark-mode-only inset border), a large radius, regular font weight, and tighter vertical padding. Horizontal and vertical padding are now separate variables so the placement offset applies to the correct axis.
+
+## 0.27.9
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.27.8
+
+### Patch Changes
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): derive the border radius scale from `--scalar-radius`
+
+  The radius tokens used to be independent, so setting `--scalar-radius: 0` still left rounded corners
+  behind on anything using `--scalar-radius-lg`, `--scalar-radius-xl` or `rounded-full`. They now all
+  derive from `--scalar-radius`, which means overriding that single variable rescales every corner in the
+  interface, and `0` squares it off completely.
+
+  Two new tokens fill out the scale, `--scalar-radius-2xl` (12px) and `--scalar-radius-3xl` (16px), along
+  with `--scalar-radius-full` for pills and circles. The matching `rounded-2xl` and `rounded-3xl` Tailwind
+  utilities now emit CSS; previously they were silently dropped.
+
+  Every default value is unchanged, so nothing shifts unless you were relying on the old behaviour. If
+  your theme sets `--scalar-radius` on its own and expects the larger radii to stay put, set those tokens
+  explicitly. Override `--scalar-radius` on `:root`: a custom property substitutes `var()` at the element
+  where it is declared, so setting the base further down the tree moves it without moving anything derived
+  from it.
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): cap container corners with `--scalar-radius-max`
+
+  A large `--scalar-radius` used to curve tall containers hard enough that they swallowed their own
+  content: dropdown panels clipped their last rows, and code blocks rendered as stadiums.
+
+  Every radius token except `--scalar-radius-full` now clamps to a new `--scalar-radius-max`, which
+  defaults to `20px`. A new `--scalar-radius-md` gives the base radius the same cap, and is what
+  `rounded`, `rounded-md` and form controls now use. Pills and circles are deliberately exempt, so
+  avatars, spinners and toggles stay round.
+
+  The reset no longer sets a `border-radius` on `:focus-visible`. It was reshaping the focused element
+  rather than its outline, which meant a large theme radius turned bare focus containers into pills the
+  moment they were focused. Outlines already follow an element's own corners, so focus rings now match
+  whatever shape the element actually has.
+
+  Defaults are unchanged: every default token sits at or below the cap, so nothing moves unless you were
+  already setting a very large radius.
+
+## 0.27.7
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.27.6
+
+### Patch Changes
+
+- [#9668](https://github.com/scalar/scalar/pull/9668): feat: add tristate toggle and tristate toggle group components
+
+## 0.27.5
+
+## 0.27.4
+
+### Patch Changes
+
+- [#9597](https://github.com/scalar/scalar/pull/9597): Add API Reference UI localization configuration with built-in English, Russian, Spanish, French, German, Simplified Chinese and Arabic translations, including automatic RTL direction for Arabic locales.
+
+  Update the shared theme reset so text inputs align to the logical start by default for RTL documents.
+
+  Add a `mergeObjects` deep-merge helper to `@scalar/helpers`, used by the localization layer to merge translation overrides onto the built-in locale.
+
+- [#9590](https://github.com/scalar/scalar/pull/9590): Add syntax highlighting for the Mojo programming language
+
+## 0.27.3
+
+### Patch Changes
+
+- [#9565](https://github.com/scalar/scalar/pull/9565): Apply the themed placeholder color and font to textarea placeholders so they match input placeholders
+
+## 0.27.2
+
+### Patch Changes
+
+- [#9536](https://github.com/scalar/scalar/pull/9536): Fix `ScalarTooltip` offset gap on `-start` / `-end` placements. The offset was applied as uniform padding on all four sides of the tooltip, which shifted the visible box inward by the offset amount on edge-aligned placements (e.g. `top-start`, `bottom-end`) since Floating UI aligns the floating element's edge with the target's edge. The offset gap is now applied only to the side facing the target, so the tooltip lines up flush with the target on the start/end axis.
+
+## 0.27.1
+
+## 0.27.0
+
+### Minor Changes
+
+- [#9388](https://github.com/scalar/scalar/pull/9388): Add `ScalarVirtualCodeBlock` component with copy button support for virtualized code blocks
+
+### Patch Changes
+
+- [#9397](https://github.com/scalar/scalar/pull/9397): fix(components): vertically center the copy button for single-line code blocks
+- [#9421](https://github.com/scalar/scalar/pull/9421): fix(api-reference): avoid SSR hydration mismatch from the search shortcut and teleport ids
+
+  The macOS search shortcut symbol was derived from `navigator` during render, so a Mac client hydrated `⌘` where the server sent `⌃`. The platform is now resolved after mount. Teleport target ids and the search modal ids also switched from `nanoid()` to Vue's SSR-stable `useId()`.
+
+## 0.26.1
+
+### Patch Changes
+
+- [#9381](https://github.com/scalar/scalar/pull/9381): Disable font ligatures in ScalarCodeBlock so code renders with literal characters
+
+## 0.26.0
+
+### Minor Changes
+
+- [#9291](https://github.com/scalar/scalar/pull/9291): refactor: rename component subpath exports to kebab-case without the `Scalar` prefix (e.g. `@scalar/components/scalar-button` is now `@scalar/components/button`). The exported component names are unchanged (`ScalarButton`, etc.).
+
+### Patch Changes
+
+- [#9291](https://github.com/scalar/scalar/pull/9291): chore: add `./helpers` and individual component subpath exports so consumers can import directly from component subpaths instead of the package barrel, improving tree-shaking
+
+## 0.25.0
+
+### Minor Changes
+
+- [#9229](https://github.com/scalar/scalar/pull/9229): feat: sidebar document filters and registry namespace UX
+  - Rework `AppSidebar` (and related UI) so document lists respect title + namespace filtering together, with clearer controls and layout/markup cleanup.
+  - Fix sidebar navigation scrolling, a small `PublishDocumentModal` issue, and a minor tweak to `ScalarSidebarSearchInput`.
+
+## 0.24.4
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: some polish for the scalar-app
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(components): add `highlighted` Tailwind variant for Radix menu item highlight state
+
+  Adds a new `highlighted` custom Tailwind variant (matching `[data-highlighted]`) to `@scalar/themes` and uses it in `ScalarDropdownButton` to restore the hover and keyboard-navigation highlight in the workspace and team picker dropdowns.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add team switching to the scalar app
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: respect optional `VITE_SCALAR_HOTKEY_SYMBOL_SET` on ScalarHotkey to override OS-based modifier
+
+  This can be really useful when we want to have deterministic results on the CI
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(components): remove tooltip when scope is disposed
+
+## 0.24.3
+
+### Patch Changes
+
+- [#9199](https://github.com/scalar/scalar/pull/9199): feat: some polish for the scalar-app
+- [#9198](https://github.com/scalar/scalar/pull/9198): fix(components): add `highlighted` Tailwind variant for Radix menu item highlight state
+
+  Adds a new `highlighted` custom Tailwind variant (matching `[data-highlighted]`) to `@scalar/themes` and uses it in `ScalarDropdownButton` to restore the hover and keyboard-navigation highlight in the workspace and team picker dropdowns.
+
+- [#9152](https://github.com/scalar/scalar/pull/9152): feat: add team switching to the scalar app
+- [#9118](https://github.com/scalar/scalar/pull/9118): fix: respect optional `VITE_SCALAR_HOTKEY_SYMBOL_SET` on ScalarHotkey to override OS-based modifier
+
+  This can be really useful when we want to have deterministic results on the CI
+
+- [#9123](https://github.com/scalar/scalar/pull/9123): fix(components): remove tooltip when scope is disposed
+
 ## 0.24.2
 
 ### Patch Changes

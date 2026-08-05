@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ScalarLoading, useLoadingState } from '@scalar/components'
+import { ScalarLoading, useLoadingState } from '@scalar/components/loading'
 import { ScalarIconCheck, ScalarIconXCircle } from '@scalar/icons'
 import { computed } from 'vue'
 
@@ -76,7 +76,7 @@ const isLoading = computed(() =>
     var(--scalar-background-1) 95%
   );
   border: var(--scalar-border-width) solid var(--scalar-border-color);
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--scalar-radius-3xl) var(--scalar-radius-3xl) 0 0;
   display: flex;
   align-items: center;
   justify-content: space-between;

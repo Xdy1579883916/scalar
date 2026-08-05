@@ -1,7 +1,9 @@
-import type { ClientOptionGroup } from '@scalar/api-client/blocks/operation-code-sample'
+import * as apiClientModalModule from '@scalar/api-client/modal'
+import type { ClientOptionGroup } from '@scalar/blocks/code-example'
 import type { TraversedTag } from '@scalar/workspace-store/schemas/navigation'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toValue } from 'vue'
 
 import ApiReference from './ApiReference.vue'
 
@@ -718,5 +720,87 @@ describe('ApiReference Configuration Tests', { timeout: 15_000 }, () => {
     await flushPromises()
     expect(document.body.classList.contains('dark-mode')).toBe(true)
     darkWrapper.unmount()
+  })
+})
+
+describe('ApiReference custom fetch forwarding', () => {
+  it('passes configuration.customFetch to the API client modal', async () => {
+    const customFetch = vi.fn() as unknown as typeof fetch
+    const spy = vi.spyOn(apiClientModalModule, 'createApiClientModal')
+
+    const wrapper = mountComponent({
+      props: {
+        configuration: {
+          content: createBasicDocument(),
+          customFetch,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(spy).toHaveBeenCalled()
+    const passedOptions = toValue(spy.mock.calls.at(-1)?.[0].options)
+    expect(passedOptions?.customFetch).toBe(customFetch)
+
+    wrapper.unmount()
+    spy.mockRestore()
+  })
+
+  it('migrates the deprecated configuration.fetch to customFetch', async () => {
+    const customFetch = vi.fn() as unknown as typeof fetch
+    const spy = vi.spyOn(apiClientModalModule, 'createApiClientModal')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const wrapper = mountComponent({
+      props: {
+        configuration: {
+          content: createBasicDocument(),
+          fetch: customFetch,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(spy).toHaveBeenCalled()
+    const passedOptions = toValue(spy.mock.calls.at(-1)?.[0].options)
+    expect(passedOptions?.customFetch).toBe(customFetch)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`deprecated 'fetch' attribute`))
+
+    wrapper.unmount()
+    spy.mockRestore()
+    warn.mockRestore()
+  })
+})
+
+describe('ApiReference AsyncAPI onServerChange', () => {
+  it('fires onServerChange with the connection URL when an AsyncAPI server is selected', async () => {
+    const onServerChange = vi.fn()
+
+    const wrapper = mountComponent({
+      props: {
+        configuration: {
+          onServerChange,
+          content: {
+            asyncapi: '3.0.0',
+            info: { title: 'Events API', version: '1.0.0' },
+            servers: {
+              production: { host: 'broker.example.com', protocol: 'wss' },
+              development: { host: 'localhost:8080', protocol: 'ws' },
+            },
+            channels: { events: { address: 'events' } },
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const serverSelector = wrapper.findComponent({ name: 'Selector' })
+    expect(serverSelector.exists()).toBe(true)
+
+    await serverSelector.vm.$emit('update:modelValue', 'development')
+
+    expect(onServerChange).toHaveBeenCalledWith('ws://localhost:8080')
+
+    wrapper.unmount()
   })
 })

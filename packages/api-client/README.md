@@ -11,6 +11,19 @@ The Scalar API Client is a powerful tool designed to simplify API testing and in
 - embeddable component in various frontend environments
 - customizable module that can be integrated into existing projects
 
+---
+
+Scalar is an open-source API platform for teams who want beautiful developer interfaces without vendor lock-in.
+
+- **[API References](https://scalar.com/products/api-references/getting-started)** — Interactive API documentation from OpenAPI and AsyncAPI specs.
+- **[Developer Docs](https://scalar.com/products/docs/getting-started)** — Write in Markdown/MDX, generate API references, sync with two-way Git.
+- **[SDK Generator](https://scalar.com/products/sdk-generator/getting-started)** — Type-safe SDKs and CLIs in TypeScript, Python, Go, PHP, Java, and Ruby.
+- **[API Client](https://scalar.com/products/api-client/getting-started)** — Open-source, offline-first Postman alternative built on OpenAPI.
+
+20M+ monthly npm installs · 15,500+ GitHub stars · MIT licensed · [scalar.com](https://scalar.com)
+
+---
+
 ## ⚠️ Breaking Changes
 
 We have removed the old version of the clients so you must update your imports as seen below. We will keep the v2 exports for a while then remove them.
@@ -22,6 +35,7 @@ We have removed the old version of the clients so you must update your imports a
 - Real-time request/response logging
 - Customizable request headers and parameters
 - Response visualization and formatting options
+- Switchable form/raw editor for JSON and YAML request bodies, driven by the OpenAPI schema (enum dropdowns, required fields, validation)
 
 ## Installation
 

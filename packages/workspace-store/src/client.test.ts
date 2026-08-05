@@ -1,11 +1,17 @@
 import { cwd } from 'node:process'
 
+import { isObject } from '@scalar/helpers/object/is-object'
 import { consoleErrorSpy, resetConsoleSpies } from '@scalar/helpers/testing/console-spies'
 import { getRaw } from '@scalar/json-magic/magic-proxy'
+import { getActiveOpenApiDocument, getOpenApiDocument } from '@test/helpers'
 import fastify, { type FastifyInstance } from 'fastify'
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { type WorkspaceDocumentInput, createWorkspaceStore } from '@/client'
+import { getPathItemOperation } from '@/helpers/for-each-path-item-operation'
+import { getResolvedRef } from '@/helpers/get-resolved-ref'
+import { isAsyncApiDocument } from '@/schemas'
+import type { OpenApiDocument } from '@/schemas/v3.1/strict/openapi-document'
 import { createServerWorkspaceStore } from '@/server'
 
 // Test document
@@ -174,11 +180,53 @@ describe('create-workspace-store', () => {
 
     // Should update the active document
     store.updateDocument('active', 'x-scalar-selected-server', 'server-2')
-    expect(store.workspace.documents['default']?.['x-scalar-selected-server']).toBe('server-2')
+    expect(getOpenApiDocument(store, 'default')?.['x-scalar-selected-server']).toBe('server-2')
 
     // Should update a specific document
     store.updateDocument('default', 'x-scalar-selected-server', 'server-3')
-    expect(store.workspace.documents['default']?.['x-scalar-selected-server']).toBe('server-3')
+    expect(getOpenApiDocument(store, 'default')?.['x-scalar-selected-server']).toBe('server-3')
+  })
+
+  it('preserves nullable array schemas with items when adding a document', async () => {
+    const store = createWorkspaceStore()
+
+    await store.addDocument(
+      {
+        name: 'test',
+        document: {
+          components: {
+            schemas: {
+              ArtifactListResponse: {
+                type: 'object',
+                properties: {
+                  items: {
+                    type: ['array', 'null'],
+                    items: {
+                      $ref: '#/components/schemas/ArtifactResponse',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      { modelsSectionLabel: 'Models' },
+    )
+
+    const document = getRaw(getOpenApiDocument(store, 'test'))
+
+    expect(document?.components?.schemas?.ArtifactListResponse).toEqual({
+      type: 'object',
+      properties: {
+        items: {
+          type: ['array', 'null'],
+          items: {
+            $ref: '#/components/schemas/ArtifactResponse',
+          },
+        },
+      },
+    })
   })
 
   it('does not throw when updating non-existent document', () => {
@@ -215,10 +263,10 @@ describe('create-workspace-store', () => {
     expect(result).toBe(true)
 
     // Should update the meta field
-    expect(store.workspace.documents['test-doc']?.['x-scalar-selected-server']).toBe('updated-server')
+    expect(getOpenApiDocument(store, 'test-doc')?.['x-scalar-selected-server']).toBe('updated-server')
 
     // Should preserve other document fields (note: openapi version gets upgraded to 3.1.1)
-    const document = store.workspace.documents['test-doc']
+    const document = getOpenApiDocument(store, 'test-doc')
     expect(document?.info.title).toBe('Test API')
     expect(document?.openapi).toBeDefined()
   })
@@ -253,13 +301,13 @@ describe('create-workspace-store', () => {
     })
 
     // Correctly gets the active document
-    expect(store.workspace.activeDocument?.info?.title).toBe('My API')
+    expect(getActiveOpenApiDocument(store)?.info?.title).toBe('My API')
 
     store.update('x-scalar-active-document', 'document2')
-    expect(store.workspace.activeDocument?.info?.title).toBe('Second API')
+    expect(getActiveOpenApiDocument(store)?.info?.title).toBe('Second API')
 
     // Correctly get a specific document
-    expect(store.workspace.documents['default']).toEqual({
+    expect(getOpenApiDocument(store, 'default')).toEqual({
       info: {
         title: 'My API',
         version: '',
@@ -380,16 +428,65 @@ describe('create-workspace-store', () => {
     })
 
     expect(
-      (store?.workspace?.activeDocument?.paths?.['/users']?.get as any)?.responses?.[200]?.content['application/json']
-        .schema.items['$ref-value'].properties.name,
+      (getPathItemOperation(getActiveOpenApiDocument(store)?.paths?.['/users'], 'get') as any)?.responses?.[200]
+        ?.content['application/json'].schema.items['$ref-value'].properties.name,
     ).toEqual({
       type: 'string',
       description: 'The user name',
     })
   })
 
-  // TODO: See (1*) note
-  it.skip('correctly resolve chunks from the remote server', async () => {
+  it('resolves operations when a path item is a $ref to components.pathItems', async () => {
+    const store = createWorkspaceStore()
+
+    await store.addDocument({
+      name: 'default',
+      document: {
+        openapi: '3.1.1',
+        info: { title: 'My API' },
+        components: {
+          pathItems: {
+            UsersPath: {
+              get: {
+                summary: 'Get all users',
+                responses: {
+                  '200': {
+                    description: 'Successful response',
+                  },
+                },
+              },
+            },
+          },
+        },
+        paths: {
+          '/users': {
+            $ref: '#/components/pathItems/UsersPath',
+          },
+        },
+      },
+    })
+
+    const document = getActiveOpenApiDocument(store)
+    const pathItem = document?.paths?.['/users']
+
+    // typebox coerces the bare $ref into a wrapper that keeps the resolved value alongside the $ref
+    expect(pathItem).toHaveProperty('$ref', '#/components/pathItems/UsersPath')
+
+    // The referenced operation resolves through the path-item $ref
+    expect(getPathItemOperation(pathItem, 'get')?.summary).toBe('Get all users')
+
+    // And it surfaces in the generated navigation
+    const operationEntry = document?.['x-scalar-navigation']?.children?.find(
+      (child) => 'path' in child && child.path === '/users',
+    )
+    expect(operationEntry).toMatchObject({
+      type: 'operation',
+      method: 'get',
+      path: '/users',
+    })
+  })
+
+  it('correctly resolve chunks from the remote server', async () => {
     server.get('/*', (req, res) => {
       const path = req.url
       const contents = serverStore.get(path)
@@ -417,7 +514,7 @@ describe('create-workspace-store', () => {
     })
 
     // The operation should not be resolved on the fly
-    expect(store.workspace.activeDocument?.paths?.['/users']?.get).toEqual({
+    expect(getPathItemOperation(getActiveOpenApiDocument(store)?.paths?.['/users'], 'get')).toEqual({
       '$ref': `${url}/default/operations/~1users/get#`,
       $global: true,
     })
@@ -426,14 +523,13 @@ describe('create-workspace-store', () => {
     await store.resolve(['paths', '/users', 'get'])
 
     // We expect the ref to have been resolved with the correct contents
-    expect((store.workspace.activeDocument?.paths?.['/users']?.get as any)['$ref-value'].summary).toEqual(
-      getDocument().paths['/users'].get.summary,
-    )
+    expect(
+      (getPathItemOperation(getActiveOpenApiDocument(store)?.paths?.['/users'], 'get') as any)['$ref-value'].summary,
+    ).toEqual(getDocument().paths['/users'].get.summary)
 
     expect(
-      (store.workspace.activeDocument?.paths?.['/users']?.get as any)['$ref-value']?.responses?.[200]?.content[
-        'application/json'
-      ]?.schema?.items['$ref-value']['$ref-value'],
+      (getPathItemOperation(getActiveOpenApiDocument(store)?.paths?.['/users'], 'get') as any)['$ref-value']
+        ?.responses?.[200]?.content['application/json']?.schema?.items['$ref-value']['$ref-value'],
     ).toEqual({
       ...getDocument().components.schemas.User,
     })
@@ -455,13 +551,13 @@ describe('create-workspace-store', () => {
     })
 
     expect(Object.keys(store.workspace.documents)).toEqual(['default'])
-    expect(store.workspace.documents['default']?.info?.title).toEqual(getDocument().info.title)
+    expect(getOpenApiDocument(store, 'default')?.info?.title).toEqual(getDocument().info.title)
 
     // Add a new remote file
     await store.addDocument({ name: 'new', url: url })
 
     expect(Object.keys(store.workspace.documents)).toEqual(['default', 'new'])
-    expect(store.workspace.documents['new']?.info?.title).toEqual(getDocument().info.title)
+    expect(getOpenApiDocument(store, 'new')?.info?.title).toEqual(getDocument().info.title)
   })
 
   // TODO: handle server side preprocessed documents (nested refs)
@@ -545,7 +641,7 @@ describe('create-workspace-store', () => {
     })
 
     // The operation should not be resolved on the fly
-    expect(store.workspace.activeDocument?.paths?.['/users']?.get).toEqual({
+    expect(getPathItemOperation(getActiveOpenApiDocument(store)?.paths?.['/users'], 'get')).toEqual({
       '$ref': `${url}/default/operations/~1users/get#`,
       $global: true,
     })
@@ -553,7 +649,7 @@ describe('create-workspace-store', () => {
     // We resolve the ref
     await store.resolve(['paths', '/users', 'get'])
 
-    expect((store.workspace.activeDocument?.components?.schemas?.['User'] as any)['$ref-value'].type).toBe('object')
+    expect((getActiveOpenApiDocument(store)?.components?.schemas?.['User'] as any)['$ref-value'].type).toBe('object')
   })
 
   it('build the sidebar client side', async () => {
@@ -689,7 +785,7 @@ describe('create-workspace-store', () => {
           {
             'children': [
               {
-                'id': 'default/model/Todo',
+                'id': 'default/models/Todo',
                 'name': 'Todo',
                 'title': 'Todo',
                 ref: '#/components/schemas/Todo',
@@ -751,7 +847,7 @@ describe('create-workspace-store', () => {
 
     const result = store.buildSidebar('test-doc')
     expect(result).toBe(true)
-    expect(store.workspace.documents['test-doc']?.['x-scalar-navigation']).toBeDefined()
+    expect(getOpenApiDocument(store, 'test-doc')?.['x-scalar-navigation']).toBeDefined()
   })
 
   it('bundles the document if the document is not preprocessed by the server-side-store', async () => {
@@ -788,7 +884,7 @@ describe('create-workspace-store', () => {
       },
     })
 
-    expect(store.workspace.documents['default']).toEqual({
+    expect(getOpenApiDocument(store, 'default')).toEqual({
       info: {
         title: '',
         version: '',
@@ -839,7 +935,7 @@ describe('create-workspace-store', () => {
         'c9f3677': 'http://localhost:9988',
       },
       'x-original-oas-version': undefined,
-      'x-scalar-order': ['default/description/introduction'],
+      'x-scalar-order': ['default/description/introduction', 'default/GET/ping'],
       'x-scalar-navigation': {
         type: 'document',
         id: 'default',
@@ -850,6 +946,15 @@ describe('create-workspace-store', () => {
             id: 'default/description/introduction',
             title: 'Introduction',
             type: 'text',
+          },
+          {
+            id: 'default/GET/ping',
+            isDeprecated: false,
+            method: 'get',
+            path: '/ping',
+            ref: '#/paths/~1ping/get',
+            title: 'Ping the remote server',
+            type: 'operation',
           },
         ],
       },
@@ -898,7 +1003,7 @@ describe('create-workspace-store', () => {
       },
     })
 
-    expect(store.workspace.documents['default']).toEqual({
+    expect(getOpenApiDocument(store, 'default')).toEqual({
       components: {
         schemas: {
           User: {
@@ -998,7 +1103,7 @@ describe('create-workspace-store', () => {
           {
             children: [
               {
-                'id': 'default/model/User',
+                'id': 'default/models/User',
                 name: 'User',
                 ref: '#/components/schemas/User',
                 title: 'User',
@@ -1180,7 +1285,7 @@ describe('create-workspace-store', () => {
     })
 
     expect(JSON.stringify(getRaw(store.workspace.activeDocument))).toBe(
-      '{"openapi":"3.1.1","info":{"title":"API with Circular Dependencies","version":"1.0.0"},"components":{"schemas":{"Base":{"required":["Type"],"type":"object","anyOf":[{"$ref":"#/components/schemas/Derived1"},{"$ref":"#/components/schemas/Derived2"}],"discriminator":{"propertyName":"Type","mapping":{"Value1":"#/components/schemas/Derived1","Value2":"#/components/schemas/Derived2"}}},"Derived1":{"properties":{"Type":{"enum":["Value1"],"type":"string"}},"type":"object"},"Derived2":{"required":["Ref"],"properties":{"Type":{"enum":["Value2"],"type":"string"},"Ref":{"$ref":"#/components/schemas/Base"}},"type":"object"}}},"x-original-oas-version":"3.0.1","x-scalar-original-document-hash":"610992c88d31ff46","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"API with Circular Dependencies","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/Base","title":"Base","name":"Base","ref":"#/components/schemas/Base","type":"model"},{"id":"default/model/Derived1","title":"Derived1","name":"Derived1","ref":"#/components/schemas/Derived1","type":"model"},{"id":"default/model/Derived2","title":"Derived2","name":"Derived2","ref":"#/components/schemas/Derived2","type":"model"}]}]}}',
+      '{"openapi":"3.1.1","info":{"title":"API with Circular Dependencies","version":"1.0.0"},"components":{"schemas":{"Base":{"required":["Type"],"type":"object","anyOf":[{"$ref":"#/components/schemas/Derived1"},{"$ref":"#/components/schemas/Derived2"}],"discriminator":{"propertyName":"Type","mapping":{"Value1":"#/components/schemas/Derived1","Value2":"#/components/schemas/Derived2"}}},"Derived1":{"properties":{"Type":{"enum":["Value1"],"type":"string"}},"type":"object"},"Derived2":{"required":["Ref"],"properties":{"Type":{"enum":["Value2"],"type":"string"},"Ref":{"$ref":"#/components/schemas/Base"}},"type":"object"}}},"x-original-oas-version":"3.0.1","x-scalar-original-document-hash":"610992c88d31ff46","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"API with Circular Dependencies","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/Base","title":"Base","name":"Base","ref":"#/components/schemas/Base","type":"model"},{"id":"default/models/Derived1","title":"Derived1","name":"Derived1","ref":"#/components/schemas/Derived1","type":"model"},{"id":"default/models/Derived2","title":"Derived2","name":"Derived2","ref":"#/components/schemas/Derived2","type":"model"}]}]}}',
     )
   })
 
@@ -1242,7 +1347,7 @@ describe('create-workspace-store', () => {
     })
 
     expect(JSON.stringify(getRaw(store.workspace.activeDocument))).toBe(
-      '{"openapi":"3.1.0","info":{"title":"Hello World","version":"1.0.0"},"components":{"schemas":{"JsonObject":{"additionalProperties":{"$ref":"#/components/schemas/JsonValue"},"type":"object"},"JsonValue":{"anyOf":[{"type":"string"},{"type":"number","format":"double"},{"type":"boolean"},{"$ref":"#/components/schemas/JsonObject"}],"__scalar_":""}}},"paths":{"/get":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/JsonObject"}}},"description":""}}}}},"x-original-oas-version":"3.1.0","x-scalar-original-document-hash":"c5b2baf356d07163","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/GET/get","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"Hello World","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/get","title":"/get","path":"/get","method":"get","ref":"#/paths/~1get/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/JsonObject","title":"JsonObject","name":"JsonObject","ref":"#/components/schemas/JsonObject","type":"model"},{"id":"default/model/JsonValue","title":"JsonValue","name":"JsonValue","ref":"#/components/schemas/JsonValue","type":"model"}]}]}}',
+      '{"openapi":"3.1.0","info":{"title":"Hello World","version":"1.0.0"},"components":{"schemas":{"JsonObject":{"additionalProperties":{"$ref":"#/components/schemas/JsonValue"},"type":"object"},"JsonValue":{"anyOf":[{"type":"string"},{"type":"number","format":"double"},{"type":"boolean"},{"$ref":"#/components/schemas/JsonObject"}],"__scalar_":""}}},"paths":{"/get":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/JsonObject"}}},"description":""}}}}},"x-original-oas-version":"3.1.0","x-scalar-original-document-hash":"c5b2baf356d07163","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/GET/get","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"Hello World","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/get","title":"/get","path":"/get","method":"get","ref":"#/paths/~1get/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/JsonObject","title":"JsonObject","name":"JsonObject","ref":"#/components/schemas/JsonObject","type":"model"},{"id":"default/models/JsonValue","title":"JsonValue","name":"JsonValue","ref":"#/components/schemas/JsonValue","type":"model"}]}]}}',
     )
   })
 
@@ -1334,7 +1439,7 @@ describe('create-workspace-store', () => {
     })
 
     expect(JSON.stringify(getRaw(store.workspace.activeDocument))).toBe(
-      '{"openapi":"3.1.0","paths":{"/test":{"post":{"operationId":"post","parameters":[{"name":"filter","required":true,"in":"query","schema":{"$ref":"#/components/schemas/FilterSet"}}],"responses":{}}}},"info":{"title":"API Reference","description":"API Reference","version":"1.0.0","contact":{}},"tags":[],"servers":[],"components":{"schemas":{"FilterSet":{"$schema":"https://json-schema.org/draft/2020-12/schema","id":"FilterSet","type":"object","properties":{"type":{"type":"string","const":"nested"},"conjunction":{"type":"string","enum":["and","or"]},"conditions":{"type":"array","items":{"anyOf":[{"anyOf":[{"type":"object","properties":{"type":{"type":"string","const":"single"},"field":{"type":"string"},"operator":{"type":"string","enum":["eq","ne","gt","lt","gte","lte","like","nlike"]},"value":{"type":"string"}}}],"__scalar_":""},{"$ref":"#/components/schemas/FilterSet"}],"__scalar_":""}}}}}},"x-original-oas-version":"3.1.0","x-scalar-original-document-hash":"da2698cc38ffc271","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/POST/test","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"API Reference","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/POST/test","title":"/test","path":"/test","method":"post","ref":"#/paths/~1test/post","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/FilterSet","title":"FilterSet","name":"FilterSet","ref":"#/components/schemas/FilterSet","type":"model"}]}]}}',
+      '{"openapi":"3.1.0","paths":{"/test":{"post":{"operationId":"post","parameters":[{"name":"filter","required":true,"in":"query","schema":{"$ref":"#/components/schemas/FilterSet"}}],"responses":{}}}},"info":{"title":"API Reference","description":"API Reference","version":"1.0.0","contact":{}},"tags":[],"servers":[],"components":{"schemas":{"FilterSet":{"$schema":"https://json-schema.org/draft/2020-12/schema","id":"FilterSet","type":"object","properties":{"type":{"type":"string","const":"nested"},"conjunction":{"type":"string","enum":["and","or"]},"conditions":{"type":"array","items":{"anyOf":[{"anyOf":[{"type":"object","properties":{"type":{"type":"string","const":"single"},"field":{"type":"string"},"operator":{"type":"string","enum":["eq","ne","gt","lt","gte","lte","like","nlike"]},"value":{"type":"string"}}}],"__scalar_":""},{"$ref":"#/components/schemas/FilterSet"}],"__scalar_":""}}}}}},"x-original-oas-version":"3.1.0","x-scalar-original-document-hash":"da2698cc38ffc271","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/POST/test","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"API Reference","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/POST/test","title":"/test","path":"/test","method":"post","ref":"#/paths/~1test/post","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/FilterSet","title":"FilterSet","name":"FilterSet","ref":"#/components/schemas/FilterSet","type":"model"}]}]}}',
     )
   })
 
@@ -1418,7 +1523,7 @@ describe('create-workspace-store', () => {
       '{"documents":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"#/x-ext/26e1ce1"}}}},"x-original-oas-version":"3.1.1","x-scalar-original-document-hash":"22a67d89a1832713","x-scalar-original-source-url":"http://localhost:9988","x-ext-urls":{"26e1ce1":"a"},"x-ext":{"26e1ce1":{"description":"Some description","content":{}}},"info":{"title":"","version":""},"x-scalar-order":["default/description/introduction","default/GET/users"],"x-scalar-navigation":{"id":"default","type":"document","title":"Untitled Document","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"/users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false}]}}},"meta":{},"originalDocuments":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"http://localhost:9988/a"}}}}}},"intermediateDocuments":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"http://localhost:9988/a"}}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
     )
 
-    await store.replaceDocument('default', getRaw(store.workspace.documents['default'] ?? {}))
+    await store.replaceDocument('default', getRaw(getOpenApiDocument(store, 'default') ?? {}))
 
     expect(JSON.stringify(store.exportWorkspace())).toEqual(
       '{"documents":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"#/x-ext/26e1ce1"}}}},"x-original-oas-version":"3.1.1","x-scalar-original-document-hash":"22a67d89a1832713","x-scalar-original-source-url":"http://localhost:9988","x-ext-urls":{"26e1ce1":"a"},"x-ext":{"26e1ce1":{"description":"Some description","content":{}}},"info":{"title":"","version":""},"x-scalar-order":["default/description/introduction","default/GET/users"],"x-scalar-navigation":{"id":"default","type":"document","title":"Untitled Document","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"/users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false}]},"x-scalar-is-dirty":true}},"meta":{},"originalDocuments":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"http://localhost:9988/a"}}}}}},"intermediateDocuments":{"default":{"openapi":"3.1.1","paths":{"/users":{"get":{"requestBody":{"$ref":"http://localhost:9988/a"}}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
@@ -1639,8 +1744,8 @@ describe('create-workspace-store', () => {
       },
     })
 
-    expect(store.workspace.activeDocument?.['x-original-oas-version']).toBe('2.0')
-    expect(store.workspace.activeDocument?.['x-scalar-order']).toEqual([
+    expect(getActiveOpenApiDocument(store)?.['x-original-oas-version']).toBe('2.0')
+    expect(getActiveOpenApiDocument(store)?.['x-scalar-order']).toEqual([
       'default/description/introduction',
       'default/GET/ping',
     ])
@@ -1684,8 +1789,8 @@ describe('create-workspace-store', () => {
       },
     })
 
-    expect(store.workspace.activeDocument?.['x-original-oas-version']).toBe('3.0.0')
-    expect(store.workspace.activeDocument?.['x-scalar-order']).toEqual([
+    expect(getActiveOpenApiDocument(store)?.['x-original-oas-version']).toBe('3.0.0')
+    expect(getActiveOpenApiDocument(store)?.['x-scalar-order']).toEqual([
       'default/description/introduction',
       'default/GET/ping',
     ])
@@ -1700,16 +1805,16 @@ describe('create-workspace-store', () => {
       },
     })
 
-    expect(store.workspace.activeDocument?.['x-scalar-is-dirty']).toBeUndefined()
+    expect(getActiveOpenApiDocument(store)?.['x-scalar-is-dirty']).toBeUndefined()
 
     assert(store.workspace.activeDocument)
     store.workspace.activeDocument.info.title = 'My API'
 
-    expect(store.workspace.activeDocument?.['x-scalar-is-dirty']).toBe(true)
+    expect(getActiveOpenApiDocument(store)?.['x-scalar-is-dirty']).toBe(true)
 
     await store.saveDocument('default')
 
-    expect(store.workspace.activeDocument?.['x-scalar-is-dirty']).toBe(false)
+    expect(getActiveOpenApiDocument(store)?.['x-scalar-is-dirty']).toBe(false)
   })
 
   it('does uses the file loader plugin to resolve local file references', async () => {
@@ -1794,8 +1899,8 @@ describe('create-workspace-store', () => {
 
       expect(result).toBe(true)
       expect(fileLoaderExec).toHaveBeenCalledWith('/path/to/openapi.yaml')
-      expect(store.workspace.documents['fs-document']).toBeDefined()
-      expect(store.workspace.documents['fs-document']?.info.title).toBe('File System API')
+      expect(getOpenApiDocument(store, 'fs-document')).toBeDefined()
+      expect(getOpenApiDocument(store, 'fs-document')?.info.title).toBe('File System API')
     })
 
     it('sets the correct document source when loading from file path', async () => {
@@ -1822,7 +1927,7 @@ describe('create-workspace-store', () => {
         path: '/Users/projects/specs/api.yaml',
       })
 
-      const document = store.workspace.documents['local-doc']
+      const document = getOpenApiDocument(store, 'local-doc')
       expect(document?.['x-scalar-original-source-url']).toBe('/Users/projects/specs/api.yaml')
     })
 
@@ -1837,8 +1942,8 @@ describe('create-workspace-store', () => {
 
       expect(result).toBe(false)
       expect(consoleErrorSpy).toHaveBeenCalledWith('No loader provided for loading files')
-      expect(store.workspace.documents['missing-loader']).toBeDefined()
-      expect(store.workspace.documents['missing-loader']?.info.title).toContain('could not be loaded')
+      expect(getOpenApiDocument(store, 'missing-loader')).toBeDefined()
+      expect(getOpenApiDocument(store, 'missing-loader')?.info.title).toContain('could not be loaded')
     })
 
     it('preserves document metadata when loading from file', async () => {
@@ -1868,7 +1973,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      const document = store.workspace.documents['test-doc']
+      const document = getOpenApiDocument(store, 'test-doc')
       expect(document?.['x-scalar-selected-server']).toBe('staging')
     })
 
@@ -1927,7 +2032,7 @@ describe('create-workspace-store', () => {
 
       expect(fileLoaderExec).toHaveBeenCalledWith('./main-spec.yaml')
       expect(fileLoaderExec).toHaveBeenCalledWith(`${cwd()}/operations/get-items.yaml`)
-      expect(store.workspace.documents['ref-doc']).toBeDefined()
+      expect(getOpenApiDocument(store, 'ref-doc')).toBeDefined()
     })
 
     it('stores the original document hash when loading from file', async () => {
@@ -1954,7 +2059,7 @@ describe('create-workspace-store', () => {
         path: '/specs/test.yaml',
       })
 
-      const document = store.workspace.documents['hash-doc']
+      const document = getOpenApiDocument(store, 'hash-doc')
       expect(document?.['x-scalar-original-document-hash']).toBeDefined()
       expect(typeof document?.['x-scalar-original-document-hash']).toBe('string')
     })
@@ -2006,8 +2111,8 @@ describe('create-workspace-store', () => {
 
       expect(result1).toBe(true)
       expect(result2).toBe(true)
-      expect(store.workspace.documents['doc1']?.info.title).toBe('API 1')
-      expect(store.workspace.documents['doc2']?.info.title).toBe('API 2')
+      expect(getOpenApiDocument(store, 'doc1')?.info.title).toBe('API 1')
+      expect(getOpenApiDocument(store, 'doc2')?.info.title).toBe('API 2')
     })
   })
 
@@ -2099,8 +2204,9 @@ describe('create-workspace-store', () => {
         document: getDocument(),
       })
 
-      if (store.workspace.documents['api-3']?.info?.title) {
-        store.workspace.documents['api-3'].info.title = 'Updated API'
+      const apiThreeDoc = getOpenApiDocument(store, 'api-3')
+      if (apiThreeDoc?.info?.title) {
+        apiThreeDoc.info.title = 'Updated API'
       }
 
       // Write the changes back to the original document
@@ -2146,8 +2252,9 @@ describe('create-workspace-store', () => {
         },
       })
 
-      if (store.workspace.activeDocument?.info?.title) {
-        store.workspace.activeDocument.info.title = 'Updated API'
+      const activeDoc = getActiveOpenApiDocument(store)
+      if (activeDoc?.info?.title) {
+        activeDoc.info.title = 'Updated API'
       }
 
       // Write the changes back to the original document
@@ -2190,7 +2297,7 @@ describe('create-workspace-store', () => {
       })
 
       expect(JSON.stringify(store.exportWorkspace())).toEqual(
-        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"#/x-ext/c9f3677"}}},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"6d9bcd00d4525750","x-ext-urls":{"c9f3677":"http://localhost:9988"},"x-ext":{"c9f3677":{"description":"This is an external document"}},"x-scalar-order":["default/description/introduction","default/GET/users","default/GET/external","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"id":"default/GET/external","title":"/external","path":"/external","method":"get","ref":"#/paths/~1external/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]}}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
+        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"#/x-ext/c9f3677"}}},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"6d9bcd00d4525750","x-ext-urls":{"c9f3677":"http://localhost:9988"},"x-ext":{"c9f3677":{"description":"This is an external document"}},"x-scalar-order":["default/description/introduction","default/GET/users","default/GET/external","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"id":"default/GET/external","title":"/external","path":"/external","method":"get","ref":"#/paths/~1external/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]}}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
       )
 
       await store.replaceDocument('default', {
@@ -2206,7 +2313,7 @@ describe('create-workspace-store', () => {
       })
 
       expect(JSON.stringify(store.exportWorkspace())).toEqual(
-        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"#/x-ext/c22ed8d"}}},"x-scalar-is-dirty":true,"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"id":"default/GET/external","title":"/external","path":"/external","method":"get","ref":"#/paths/~1external/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"6d9bcd00d4525750","x-ext-urls":{"c22ed8d":"http://localhost:9988/some-other-path"},"x-ext":{"c22ed8d":{"description":"New content"}},"x-scalar-order":["default/description/introduction","default/GET/users","default/GET/external","default/models"]}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
+        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"#/x-ext/c22ed8d"}}},"x-scalar-is-dirty":true,"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"id":"default/GET/external","title":"/external","path":"/external","method":"get","ref":"#/paths/~1external/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"6d9bcd00d4525750","x-ext-urls":{"c22ed8d":"http://localhost:9988/some-other-path"},"x-ext":{"c22ed8d":{"description":"New content"}},"x-scalar-order":["default/description/introduction","default/GET/users","default/GET/external","default/models"]}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}},"/external":{"get":{"$ref":"http://localhost:9988"}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
       )
     })
   })
@@ -2233,8 +2340,9 @@ describe('create-workspace-store', () => {
         document: getDocument(),
       })
 
-      if (store.workspace.documents['api-3']?.info?.title) {
-        store.workspace.documents['api-3'].info.title = 'Updated API'
+      const apiThreeDoc = getOpenApiDocument(store, 'api-3')
+      if (apiThreeDoc?.info?.title) {
+        apiThreeDoc.info.title = 'Updated API'
       }
 
       expect(store.workspace?.documents['api-3']?.info?.title).toBe('Updated API')
@@ -2299,7 +2407,7 @@ describe('create-workspace-store', () => {
       const doc = getDocument()
       await store.addDocument({ name: 'default', document: doc })
 
-      const result = await store.getEditableDocument('default')
+      const result = (await store.getEditableDocument('default')) as OpenApiDocument | null
 
       expect(result).not.toBeNull()
       // Store upgrades OpenAPI to 3.1.x when adding document
@@ -2354,7 +2462,7 @@ describe('create-workspace-store', () => {
         result.info.title = 'Mutated title'
       }
 
-      const workspaceDoc = store.workspace.documents['default']
+      const workspaceDoc = getOpenApiDocument(store, 'default')
       const rawDoc = getRaw(workspaceDoc as object) as { info?: { title?: string } }
       expect(rawDoc?.info?.title).not.toBe('Mutated title')
     })
@@ -2374,7 +2482,7 @@ describe('create-workspace-store', () => {
         name: 'default',
         document: { openapi: '3.1.0', info: { title: 'Initial', version: '1.0.0' } },
       })
-      const doc = store.workspace.documents['default']
+      const doc = getOpenApiDocument(store, 'default')
       if (doc?.info) {
         doc.info.title = 'Updated title'
       }
@@ -2414,7 +2522,7 @@ describe('create-workspace-store', () => {
         name: 'api',
         document: { openapi: '3.1.0', info: { title: 'A', version: '1.0.0' } },
       })
-      const doc = store.workspace.documents['api']
+      const doc = getOpenApiDocument(store, 'api')
       if (doc?.info) {
         doc.info.title = 'B'
       }
@@ -2633,9 +2741,9 @@ describe('create-workspace-store', () => {
         },
       })
 
-      expect(store.workspace.documents['default']?.info?.title).toBe('My Updated API')
-      expect(store.workspace.documents['default']?.info?.version).toBe('2.0.0')
-      expect(store.workspace.documents['default']?.openapi).toBe('3.1.1')
+      expect(getOpenApiDocument(store, 'default')?.info?.title).toBe('My Updated API')
+      expect(getOpenApiDocument(store, 'default')?.info?.version).toBe('2.0.0')
+      expect(getOpenApiDocument(store, 'default')?.openapi).toBe('3.1.1')
     })
 
     it('edit the override values', async () => {
@@ -2652,7 +2760,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      const defaultDocument = store.workspace.documents['default']
+      const defaultDocument = getOpenApiDocument(store, 'default')
 
       if (!defaultDocument) {
         throw new Error('Default document not found')
@@ -2679,7 +2787,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      const defaultDocument = store.workspace.documents['default']
+      const defaultDocument = getOpenApiDocument(store, 'default')
 
       if (!defaultDocument) {
         throw new Error('Default document not found')
@@ -2711,7 +2819,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      const defaultDocument = store.workspace.documents['default']
+      const defaultDocument = getOpenApiDocument(store, 'default')
 
       if (!defaultDocument) {
         throw new Error('Default document not found')
@@ -2732,7 +2840,7 @@ describe('create-workspace-store', () => {
 
       expect(newStore.workspace.documents['default']?.info.title).toBe('Edited title')
       expect(newStore.workspace.documents['default']?.info.version).toBe('2.0.0')
-      expect(newStore.workspace.documents['default']?.openapi).toBe('3.1.1')
+      expect(getOpenApiDocument(newStore, 'default')?.openapi).toBe('3.1.1')
     })
 
     it('revert should never change the overrides fields', async () => {
@@ -2749,7 +2857,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      const defaultDocument = store.workspace.documents['default']
+      const defaultDocument = getOpenApiDocument(store, 'default')
 
       if (!defaultDocument) {
         throw new Error('Default document not found')
@@ -2857,7 +2965,7 @@ describe('create-workspace-store', () => {
       })
 
       expect(JSON.stringify(store.exportWorkspace())).toEqual(
-        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"de08f342f83a5fc3","x-scalar-original-source-url":"http://localhost:9989/default","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/GET/users","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/model/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]}}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
+        '{"documents":{"default":{"openapi":"3.1.1","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}},"x-original-oas-version":"3.0.0","x-scalar-original-document-hash":"de08f342f83a5fc3","x-scalar-original-source-url":"http://localhost:9989/default","x-ext-urls":{},"x-scalar-order":["default/description/introduction","default/GET/users","default/models"],"x-scalar-navigation":{"id":"default","type":"document","title":"My API","name":"default","children":[{"id":"default/description/introduction","title":"Introduction","type":"text"},{"id":"default/GET/users","title":"Get all users","path":"/users","method":"get","ref":"#/paths/~1users/get","type":"operation","isDeprecated":false},{"type":"models","id":"default/models","title":"Models","name":"Models","children":[{"id":"default/models/User","title":"User","name":"User","ref":"#/components/schemas/User","type":"model"}]}]}}},"meta":{},"originalDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}}}},"intermediateDocuments":{"default":{"openapi":"3.0.0","info":{"title":"My API","version":"1.0.0"},"components":{"schemas":{"User":{"type":"object","properties":{"id":{"type":"string","description":"The user ID"},"name":{"type":"string","description":"The user name"},"email":{"type":"string","format":"email","description":"The user email"}}}}},"paths":{"/users":{"get":{"summary":"Get all users","responses":{"200":{"description":"Successful response","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/User"}}}}}}}}}}},"overrides":{"default":{}},"history":{},"auth":{}}',
       )
     })
 
@@ -2886,7 +2994,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      expect(store.workspace.documents['default']?.info.title).toBe('My Updated API')
+      expect(getOpenApiDocument(store, 'default')?.info.title).toBe('My Updated API')
     })
   })
 
@@ -3047,7 +3155,7 @@ describe('create-workspace-store', () => {
         },
       })
 
-      expect(store.workspace.documents['default']).toEqual({
+      expect(getOpenApiDocument(store, 'default')).toEqual({
         'openapi': '3.1.1',
         'info': { 'title': 'My API', 'version': '1.0.0' },
         'paths': {
@@ -3121,7 +3229,7 @@ describe('create-workspace-store', () => {
               'title': 'Models',
               'children': [
                 {
-                  'id': 'default/model/User',
+                  'id': 'default/models/User',
                   'title': 'User',
                   'name': 'User',
                   'ref': '#/components/schemas/User',
@@ -3178,7 +3286,7 @@ describe('create-workspace-store', () => {
       })
 
       // Should still preserve the generated navigation and upgrade the document to the latest when we try to replace it
-      expect(store.workspace.documents['default']).toEqual({
+      expect(getOpenApiDocument(store, 'default')).toEqual({
         components: {
           schemas: {
             User: {
@@ -3272,7 +3380,7 @@ describe('create-workspace-store', () => {
             {
               children: [
                 {
-                  'id': 'default/model/User',
+                  'id': 'default/models/User',
                   name: 'User',
                   ref: '#/components/schemas/User',
                   title: 'User',
@@ -3558,7 +3666,7 @@ describe('create-workspace-store', () => {
         document: getDocument(),
       })
 
-      expect(store.workspace.activeDocument?.['x-scalar-navigation']).toEqual({
+      expect(getActiveOpenApiDocument(store)?.['x-scalar-navigation']).toEqual({
         type: 'document',
         id: 'default',
         name: 'default',
@@ -3583,7 +3691,7 @@ describe('create-workspace-store', () => {
           {
             'children': [
               {
-                'id': 'default/model/User',
+                'id': 'default/models/User',
                 'name': 'User',
                 'ref': '#/components/schemas/User',
                 'title': 'User',
@@ -3624,7 +3732,7 @@ describe('create-workspace-store', () => {
       assert(result.ok)
       await result.applyChanges({ resolvedConflicts: [] }) // No conflicts to apply
 
-      expect(store.workspace.activeDocument?.['x-scalar-navigation']).toEqual({
+      expect(getActiveOpenApiDocument(store)?.['x-scalar-navigation']).toEqual({
         type: 'document',
         id: 'default',
         name: 'default',
@@ -3746,6 +3854,73 @@ describe('create-workspace-store', () => {
 
       expect(store.workspace.activeDocument?.['x-scalar-is-dirty']).toBe(false)
     })
+
+    it('preserves document-level UI settings and user servers across a rebase', async () => {
+      const documentName = 'default'
+      const store = createWorkspaceStore()
+      await store.addDocument({ name: documentName, document: getDocument() })
+
+      const active = getActiveOpenApiDocument(store)!
+      active['x-scalar-watch-mode'] = true
+      active['x-scalar-selected-server'] = 'my-server-uid'
+      active['x-scalar-environments'] = { staging: { color: '#FFFFFF', variables: [] } }
+      // A custom sidebar order, expressed with the real navigation entry IDs.
+      // Reverse the default order so the rebase has something non-trivial to
+      // restore — without the preservation it resets to the default order.
+      const customOrder = [...(active['x-scalar-order'] ?? [])].reverse()
+      active['x-scalar-order'] = customOrder
+      // Servers configured by the user — the upstream document defines none
+      active.servers = [{ url: 'http://localhost:1234' }]
+
+      // Bake the settings into the saved baseline. This is what makes the test
+      // meaningful: as unsaved local edits they would survive the rebase merge
+      // on their own, so the regression would not be caught. Once they are part
+      // of the baseline, the incoming upstream diff carries a deletion for each
+      // (upstream has none), and only the explicit preservation keeps them.
+      await store.saveDocument(documentName)
+
+      const upstream = {
+        ...getDocument(),
+        info: { title: 'Updated upstream', version: '1.0.0' },
+      }
+
+      const result = await store.rebaseDocument({ name: documentName, document: upstream })
+      assert(result.ok)
+      await result.applyChanges({ resolvedConflicts: [] })
+
+      const doc = getOpenApiDocument(store, documentName)!
+      expect(doc.info?.title).toBe('Updated upstream')
+      expect(doc['x-scalar-watch-mode']).toBe(true)
+      expect(doc['x-scalar-selected-server']).toBe('my-server-uid')
+      expect(doc['x-scalar-environments']).toEqual({ staging: { color: '#FFFFFF', variables: [] } })
+      expect(doc['x-scalar-order']).toEqual(customOrder)
+      expect(doc.servers).toEqual([{ url: 'http://localhost:1234' }])
+    })
+
+    it('keeps upstream servers authoritative when the upstream document defines them', async () => {
+      const documentName = 'default'
+      const store = createWorkspaceStore()
+      await store.addDocument({ name: documentName, document: getDocument() })
+
+      const active = getActiveOpenApiDocument(store)!
+      // A user server baked into the baseline
+      active.servers = [{ url: 'http://localhost:1234' }]
+      await store.saveDocument(documentName)
+
+      // Upstream now ships its own servers — those must win over the local ones.
+      const upstream = {
+        ...getDocument(),
+        info: { title: 'Updated upstream', version: '1.0.0' },
+        servers: [{ url: 'https://api.example.com' }],
+      }
+
+      const result = await store.rebaseDocument({ name: documentName, document: upstream })
+      assert(result.ok)
+      await result.applyChanges({ resolvedConflicts: [] })
+
+      const doc = getOpenApiDocument(store, documentName)!
+      expect(doc.servers).toEqual([{ url: 'https://api.example.com' }])
+    })
   })
 
   describe('navigation generation', () => {
@@ -3777,7 +3952,7 @@ describe('create-workspace-store', () => {
         },
       )
 
-      expect(store.workspace.activeDocument?.['x-scalar-navigation']).toEqual({
+      expect(getActiveOpenApiDocument(store)?.['x-scalar-navigation']).toEqual({
         type: 'document',
         id: 'document-1',
         name: 'document-1',
@@ -3813,6 +3988,399 @@ describe('create-workspace-store', () => {
             },
           },
         ],
+      })
+    })
+  })
+
+  describe('asyncapi documents', () => {
+    it('preserves the asyncapi discriminator and sets workspace metadata on ingestion', async () => {
+      const store = createWorkspaceStore()
+
+      await store.addDocument({
+        document: {
+          asyncapi: '3.0.0',
+          info: { title: 'Streetlights API', version: '1.0.0' },
+        },
+        name: 'streetlights',
+      })
+
+      const document = store.workspace.documents['streetlights']
+
+      // The OpenAPI coerce step would otherwise inject `openapi: ''`, breaking
+      // the type discriminator. Asserting both presence and absence guards
+      // against that regression.
+      expect(document).toMatchObject({
+        // The upgrader canonicalizes 3.0 documents to 3.1 (the original is kept below).
+        asyncapi: '3.1.0',
+        info: { title: 'Streetlights API', version: '1.0.0' },
+        'x-original-aas-version': '3.0.0',
+        'x-scalar-original-document-hash': expect.any(String),
+      })
+      expect(document?.['x-scalar-original-document-hash']).not.toBe('')
+      expect(document).not.toHaveProperty('openapi')
+      // AsyncAPI docs always carry an `x-scalar-navigation` tree so the sidebar can
+      // surface `info.description`. Without channels, tags, or a description, the only
+      // entry is the default Introduction.
+      expect(document?.['x-scalar-navigation']).toMatchObject({
+        id: 'streetlights',
+        name: 'streetlights',
+        title: 'Streetlights API',
+        type: 'document',
+        children: [{ type: 'text', title: 'Introduction' }],
+      })
+    })
+
+    it('preserves security scheme types referenced by a server during ingestion', async () => {
+      const store = createWorkspaceStore()
+
+      await store.addDocument({
+        document: {
+          asyncapi: '3.0.0',
+          info: { title: 'Secured API', version: '1.0.0' },
+          servers: {
+            production: {
+              host: 'example.com',
+              protocol: 'wss',
+              // Referencing the schemes from a server is what used to clobber them: the synthetic
+              // `$ref-value` default leaked back over the real definition through the magic proxy.
+              security: [
+                { $ref: '#/components/securitySchemes/bearerAuth' },
+                { $ref: '#/components/securitySchemes/apiKey' },
+                { $ref: '#/components/securitySchemes/oauth2' },
+              ],
+            },
+          },
+          components: {
+            securitySchemes: {
+              bearerAuth: { type: 'http', scheme: 'bearer' },
+              apiKey: { type: 'httpApiKey', name: 'X-Api-Key', in: 'header' },
+              oauth2: {
+                type: 'oauth2',
+                flows: { clientCredentials: { tokenUrl: 'https://example.com/token', availableScopes: {} } },
+              },
+            },
+          },
+        },
+        name: 'secured',
+      })
+
+      const document = store.workspace.documents['secured']
+      assert(isAsyncApiDocument(document))
+
+      const schemes = getResolvedRef(document.components)?.securitySchemes
+      expect(getResolvedRef(schemes?.bearerAuth)?.type).toBe('http')
+      expect(getResolvedRef(schemes?.apiKey)?.type).toBe('httpApiKey')
+      expect(getResolvedRef(schemes?.oauth2)?.type).toBe('oauth2')
+    })
+
+    it('upgrades the asyncapi version during ingestion and records the original', async () => {
+      const store = createWorkspaceStore()
+
+      await store.addDocument({
+        document: {
+          asyncapi: '2.6.0',
+          info: { title: 'Legacy API', version: '1.0.0' },
+        },
+        name: 'legacy',
+      })
+
+      const legacy = store.workspace.documents['legacy']
+      expect(isAsyncApiDocument(legacy)).toBe(true)
+      assert(isAsyncApiDocument(legacy))
+      // The AsyncAPI upgrader lifts the document to the latest 3.x shape the renderer expects.
+      expect(legacy.asyncapi).toBe('3.1.0')
+      // The original version is preserved for reference.
+      expect(legacy['x-original-aas-version']).toBe('2.6.0')
+    })
+
+    it('lifts 2.x channel operations into top-level operations so they render', async () => {
+      const store = createWorkspaceStore()
+
+      await store.addDocument({
+        document: {
+          asyncapi: '2.4.0',
+          info: { title: 'Cube Local API', version: 'dev' },
+          servers: { local: { url: 'localhost:1883', protocol: 'mqtt' } },
+          channels: {
+            'devices/{deviceID}/logs': {
+              parameters: { deviceID: { description: 'The ID of the device', schema: { type: 'string' } } },
+              subscribe: {
+                operationId: 'subscribeLogMessage',
+                message: { $ref: '#/components/messages/subscribeLogMessage' },
+              },
+            },
+          },
+          components: {
+            messages: {
+              subscribeLogMessage: { name: 'LogMessage', payload: { type: 'object' } },
+            },
+          },
+        },
+        name: 'cube',
+      })
+
+      const cube = store.workspace.documents['cube']
+      assert(isAsyncApiDocument(cube))
+
+      // 2.x `subscribe` is lifted to a top-level operation, and the server `url` becomes `host`.
+      expect(cube.operations?.['subscribeLogMessage']).toBeDefined()
+      expect(cube.servers?.['local']).toMatchObject({ host: 'localhost:1883', protocol: 'mqtt' })
+
+      // The channel now surfaces in the navigation tree instead of being dropped.
+      const channelTitles = JSON.stringify(cube['x-scalar-navigation'])
+      expect(channelTitles).toContain('devices/{deviceID}/logs')
+    })
+
+    it('bundles external channel references when the document is not preprocessed', async () => {
+      server.get('/channel', () => ({
+        address: 'user/signup',
+        messages: {
+          userSignedUp: {
+            payload: {
+              type: 'object',
+              properties: {
+                email: { type: 'string' },
+              },
+            },
+          },
+        },
+      }))
+      await server.listen({ port })
+
+      const store = createWorkspaceStore()
+      await store.addDocument({
+        name: 'events',
+        document: {
+          asyncapi: '3.0.0',
+          info: { title: 'Events API', version: '1.0.0' },
+          channels: {
+            'user/signedup': {
+              $ref: `${url}/channel`,
+            },
+          },
+        },
+      })
+
+      const document = store.workspace.documents['events']
+
+      assert(isAsyncApiDocument(document))
+      assert('x-ext-urls' in document && isObject(document['x-ext-urls']))
+      assert('x-ext' in document && isObject(document['x-ext']))
+
+      const extKey = Object.keys(document['x-ext-urls'] ?? {})[0]!
+      const channel = document.channels?.['user/signedup']
+
+      expect(channel && '$ref' in channel).toBe(true)
+      assert(channel && '$ref' in channel)
+
+      expect(channel?.['$ref']).toBe(`#/x-ext/${extKey}`)
+      expect(document['x-ext-urls']?.[extKey]).toBe(`${url}/channel`)
+      expect(document['x-ext']?.[extKey]).toMatchObject({
+        address: 'user/signup',
+        messages: {
+          userSignedUp: {
+            payload: {
+              type: 'object',
+              properties: {
+                email: { type: 'string' },
+              },
+            },
+          },
+        },
+      })
+      expect(store.workspace.documents['events']).not.toHaveProperty('openapi')
+    })
+
+    it('records the source url when the asyncapi document is loaded from a URL', async () => {
+      const customFetch: typeof fetch = async () => {
+        return await Promise.resolve(
+          new Response(JSON.stringify({ asyncapi: '3.0.0', info: { title: 'Remote', version: '1.0.0' } }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+      }
+      const store = createWorkspaceStore({ fetch: customFetch })
+
+      await store.addDocument({ url: 'https://example.com/asyncapi.json', name: 'remote' })
+
+      expect(store.workspace.documents['remote']).toMatchObject({
+        asyncapi: '3.1.0',
+        'x-scalar-original-source-url': 'https://example.com/asyncapi.json',
+      })
+    })
+
+    it('does coerces the values of the document and stores it on the original documents', async () => {
+      const store = createWorkspaceStore()
+
+      await store.addDocument({
+        document: {
+          'asyncapi': '3.0.0',
+          'info': {
+            'title': 'Simple Chat WebSocket API',
+            'version': '1.0.0',
+            'description': 'Basic AsyncAPI example for a chat service',
+          },
+          'servers': {
+            'production': {
+              'host': 'api.example.com',
+              'protocol': 'wss',
+              'description': 'Production WebSocket server',
+            },
+          },
+          'channels': {
+            'chat': {
+              'address': '/chat',
+              'messages': {
+                'sendMessage': {
+                  '$ref': '#/components/messages/SendMessage',
+                },
+                'receiveMessage': {
+                  '$ref': '#/components/messages/ReceiveMessage',
+                },
+              },
+            },
+          },
+          'operations': {
+            'sendChatMessage': {
+              'action': 'send',
+              'channel': {
+                '$ref': '#/channels/chat',
+              },
+              'messages': [
+                {
+                  '$ref': '#/channels/chat/messages/sendMessage',
+                },
+              ],
+            },
+            'receiveChatMessage': {
+              'action': 'receive',
+              'channel': {
+                '$ref': '#/channels/chat',
+              },
+              'messages': [
+                {
+                  '$ref': '#/channels/chat/messages/receiveMessage',
+                },
+              ],
+            },
+          },
+          'components': {
+            'messages': {
+              'SendMessage': {
+                'name': 'SendMessage',
+                'title': 'Send a chat message',
+                'payload': {
+                  'type': 'object',
+                  'properties': {
+                    'userId': {
+                      'type': 'string',
+                      'example': '123',
+                    },
+                    'message': {
+                      'type': 'string',
+                      'example': 'Hello world',
+                    },
+                    'timestamp': {
+                      'type': 'string',
+                      'format': 'date-time',
+                    },
+                  },
+                  'required': ['userId', 'message', 'timestamp'],
+                },
+              },
+              'ReceiveMessage': {
+                'name': 'ReceiveMessage',
+                'title': 'Receive a chat message',
+                'payload': {
+                  'type': 'object',
+                  'properties': {
+                    'id': {
+                      'type': 'string',
+                      'example': 'msg_001',
+                    },
+                    'userId': {
+                      'type': 'string',
+                      'example': '123',
+                    },
+                    'message': {
+                      'type': 'string',
+                      'example': 'Hello world',
+                    },
+                    'timestamp': {
+                      'type': 'string',
+                      'format': 'date-time',
+                    },
+                  },
+                  'required': ['id', 'userId', 'message', 'timestamp'],
+                },
+              },
+            },
+          },
+        },
+        name: 'chatapp',
+      })
+
+      const document = store.workspace.documents['chatapp']
+      assert(isAsyncApiDocument(document))
+
+      const navigation = document['x-scalar-navigation']
+      expect(navigation).toEqual({
+        'children': [
+          {
+            'id': 'chatapp/description/introduction',
+            'title': 'Introduction',
+            'type': 'text',
+          },
+          {
+            'channelAddress': '/chat',
+            'channelName': 'chat',
+            'children': [
+              {
+                'action': 'send',
+                'channelAddress': '/chat',
+                'channelName': 'chat',
+                'children': [
+                  {
+                    'channelName': 'chat',
+                    'id': 'chatapp/asyncapi-channel/chat/asyncapi-operation/sendchatmessage/asyncapi-message/sendmessage',
+                    'messageName': 'sendMessage',
+                    'title': 'Send a chat message',
+                    'type': 'asyncapi-message',
+                  },
+                ],
+                'id': 'chatapp/asyncapi-channel/chat/asyncapi-operation/sendchatmessage',
+                'operationName': 'sendChatMessage',
+                'title': 'sendChatMessage',
+                'type': 'asyncapi-operation',
+              },
+              {
+                'action': 'receive',
+                'channelAddress': '/chat',
+                'channelName': 'chat',
+                'children': [
+                  {
+                    'channelName': 'chat',
+                    'id': 'chatapp/asyncapi-channel/chat/asyncapi-operation/receivechatmessage/asyncapi-message/receivemessage',
+                    'messageName': 'receiveMessage',
+                    'title': 'Receive a chat message',
+                    'type': 'asyncapi-message',
+                  },
+                ],
+                'id': 'chatapp/asyncapi-channel/chat/asyncapi-operation/receivechatmessage',
+                'operationName': 'receiveChatMessage',
+                'title': 'receiveChatMessage',
+                'type': 'asyncapi-operation',
+              },
+            ],
+            'id': 'chatapp/asyncapi-channel/chat',
+            'title': '/chat',
+            'type': 'asyncapi-channel',
+          },
+        ],
+        'id': 'chatapp',
+        'name': 'chatapp',
+        'title': 'Simple Chat WebSocket API',
+        'type': 'document',
       })
     })
   })

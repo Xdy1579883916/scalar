@@ -416,4 +416,49 @@ describe('SchemaComposition', () => {
       },
     ])
   })
+
+  it('keeps a oneOf composition nested inside allOf (issue #5577)', () => {
+    const wrapper = mount(SchemaComposition, {
+      props: {
+        eventBus: null,
+        composition: 'allOf',
+        schema: coerceValue(SchemaObjectSchema, {
+          title: 'ConversionCreationRequest',
+          allOf: [
+            {
+              type: 'object',
+              properties: {
+                customerComment: { type: 'string' },
+              },
+            },
+            {
+              oneOf: [
+                { title: 'With Quote Id', type: 'object', properties: { quoteId: { type: 'string' } } },
+                { title: 'With Currency Pair', type: 'object', properties: { sourceCurrencyCode: { type: 'string' } } },
+              ],
+            },
+          ],
+        }),
+        level: 0,
+        options: {},
+      },
+    })
+
+    // The base object property is rendered by the merged Schema...
+    const baseSchema = wrapper.findComponent({ name: 'Schema' }).props('schema') as any
+    expect(baseSchema.properties).toMatchObject({ customerComment: { type: 'string' } })
+
+    // ...and the oneOf is preserved as its own composition (rendered as a sibling
+    // picker), not dropped. This is the structure that lets multiple independent
+    // oneOf groups inside one allOf each render their own selector.
+    const nestedOneOf = wrapper
+      .findAllComponents({ name: 'SchemaComposition' })
+      .find((component) => component.props('composition') === 'oneOf')
+    expect(nestedOneOf).toBeTruthy()
+
+    const oneOfSchema = nestedOneOf!.props('schema') as any
+    expect(oneOfSchema.oneOf).toHaveLength(2)
+    expect(oneOfSchema.oneOf[0].title).toBe('With Quote Id')
+    expect(oneOfSchema.oneOf[1].title).toBe('With Currency Pair')
+  })
 })

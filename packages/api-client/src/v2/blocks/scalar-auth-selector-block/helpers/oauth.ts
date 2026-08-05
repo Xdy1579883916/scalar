@@ -8,6 +8,8 @@ import { getServerVariables } from '@scalar/workspace-store/request-example'
 import type { ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { encode, fromUint8Array } from 'js-base64'
 
+import type { CustomFetch } from '@/v2/blocks/operation-block/helpers/send-request'
+
 import { getOAuthCallbackData } from './oauth-callback'
 
 /** Oauth2 security schemes which are not implicit */
@@ -25,6 +27,29 @@ export type OAuth2Tokens = {
   accessToken: string
   refreshToken?: string
 }
+
+/**
+ * Captures the OAuth2 redirect for environments where the browser-popup polling
+ * approach cannot work (notably the Electron desktop app, where the renderer
+ * runs on `file://` and providers reject `file://` redirect URIs).
+ *
+ * The implementation opens the authorization URL in the system browser and
+ * resolves once the provider redirects back. Because the redirect target (for
+ * example an ephemeral loopback port) is only known to the host environment, the
+ * implementation appends the `redirect_uri` itself and reports back the exact
+ * value it used so the token exchange can send the matching `redirect_uri`.
+ */
+export type CaptureOAuth2Callback = (params: {
+  /** The fully built authorization URL, without a `redirect_uri` parameter. */
+  authorizationUrl: string
+}) => Promise<
+  ErrorResponse<{
+    /** The full callback URL the provider redirected to, including query and/or hash params. */
+    callbackUrl: string
+    /** The `redirect_uri` the host environment used, so the token exchange can match it. */
+    redirectUri: string
+  }>
+>
 
 /** Flow types that support token refresh (all except implicit) */
 type RefreshableFlows = Exclude<keyof OAuthFlowsObjectSecret, 'implicit'>
@@ -116,6 +141,14 @@ export const authorizeOauth2 = async (
   proxyUrl: string,
   /** Flattened environment variables used to resolve server URL templates like `{protocol}` */
   environmentVariables: Record<string, string> = {},
+  /** Fetch used for the token request; the desktop app passes an IPC-backed fetch (see {@link authorizeServers}). */
+  customFetch?: CustomFetch,
+  /**
+   * Optional redirect capture for interactive flows (authorization code and implicit).
+   * When provided, the system browser plus a host-owned redirect target replaces the
+   * default popup-polling approach. Required for the Electron desktop app.
+   */
+  captureCallback?: CaptureOAuth2Callback,
 ): Promise<ErrorResponse<OAuth2Tokens>> => {
   const flow = flows[type]
 
@@ -134,6 +167,7 @@ export const authorizeOauth2 = async (
         scopes,
         {
           proxyUrl,
+          customFetch,
         },
         activeServer,
         environmentVariables,
@@ -181,15 +215,19 @@ export const authorizeOauth2 = async (
 
     const typedFlow = flows[type]! // Safe to assert due to earlier check
 
-    // Handle relative redirect uris
-    if (typedFlow['x-scalar-secret-redirect-uri'].startsWith('/')) {
-      const baseUrl =
-        getServerUrl(activeServer, environmentVariables) || window.location.origin + window.location.pathname
-      const redirectUri = new URL(typedFlow['x-scalar-secret-redirect-uri'], baseUrl).toString()
+    // The capture path appends its own `redirect_uri` (it owns the target, for
+    // example an ephemeral loopback port), so we only set it here for the popup path.
+    if (!captureCallback) {
+      // Handle relative redirect uris
+      if (typedFlow['x-scalar-secret-redirect-uri'].startsWith('/')) {
+        const baseUrl =
+          getServerUrl(activeServer, environmentVariables) || window.location.origin + window.location.pathname
+        const redirectUri = new URL(typedFlow['x-scalar-secret-redirect-uri'], baseUrl).toString()
 
-      url.searchParams.set('redirect_uri', redirectUri)
-    } else {
-      url.searchParams.set('redirect_uri', typedFlow['x-scalar-secret-redirect-uri'])
+        url.searchParams.set('redirect_uri', redirectUri)
+      } else {
+        url.searchParams.set('redirect_uri', typedFlow['x-scalar-secret-redirect-uri'])
+      }
     }
 
     if (flow['x-scalar-security-query']) {
@@ -207,6 +245,55 @@ export const authorizeOauth2 = async (
     url.searchParams.set('state', state)
     if (scopes) {
       url.searchParams.set('scope', scopes)
+    }
+
+    // Capture path: open the system browser and let the host environment catch
+    // the redirect (used by the desktop app, where popup polling cannot work).
+    if (captureCallback) {
+      const [captureError, capture] = await captureCallback({ authorizationUrl: url.toString() })
+
+      if (captureError || !capture) {
+        return [captureError ?? new Error('Failed to capture the OAuth2 redirect'), null]
+      }
+
+      const { accessToken, accessTokenParams, code, codeParams, error, errorDescription, refreshToken } =
+        getOAuthCallbackData(() => capture.callbackUrl, flow['x-tokenName'] || 'access_token')
+
+      if (error) {
+        return [new Error(`OAuth error: ${error}${errorDescription ? ` (${errorDescription})` : ''}`), null]
+      }
+
+      // Implicit Flow
+      if (accessToken) {
+        if ((accessTokenParams?.get('state') ?? null) !== state) {
+          return [new Error('State mismatch'), null]
+        }
+        return [null, { accessToken, ...(refreshToken ? { refreshToken } : {}) }]
+      }
+
+      // Authorization Code Server Flow
+      if (code && type === 'authorizationCode') {
+        if ((codeParams?.get('state') ?? null) !== state) {
+          return [new Error('State mismatch'), null]
+        }
+        return authorizeServers(
+          flows,
+          type,
+          scopes,
+          {
+            code,
+            pkce,
+            proxyUrl,
+            customFetch,
+            // The token request must echo the exact redirect_uri used in the authorization request.
+            redirectUri: capture.redirectUri,
+          },
+          activeServer,
+          environmentVariables,
+        )
+      }
+
+      return [new Error('No authorization code or access token was returned'), null]
     }
 
     const windowFeatures = 'left=100,top=100,width=800,height=600'
@@ -255,6 +342,7 @@ export const authorizeOauth2 = async (
                     code,
                     pkce,
                     proxyUrl,
+                    customFetch,
                   },
                   activeServer,
                   environmentVariables,
@@ -296,10 +384,15 @@ const authorizeServers = async (
     code,
     pkce,
     proxyUrl,
+    customFetch = fetch,
+    redirectUri,
   }: {
     code?: string
     pkce?: PKCEState | null
     proxyUrl?: string
+    customFetch?: CustomFetch
+    /** Overrides the stored redirect_uri (the capture path owns the real target). */
+    redirectUri?: string
   } = {},
   activeServer: ServerObject | null,
   environmentVariables: Record<string, string> = {},
@@ -319,6 +412,10 @@ const authorizeServers = async (
 
   /** Where to add the credentials */
   const addCredentialsToBody = flow['x-scalar-credentials-location'] === 'body'
+  /**
+   * PKCE and client authentication are independent: a confidential client may use both.
+   * We send the client_secret whenever one is set, regardless of PKCE (see RFC 9700 Section 2.1.1).
+   */
   const hasClientSecret = Boolean(flow['x-scalar-secret-client-secret'])
   /**
    * Public authorization-code clients still need client_id in the token body.
@@ -332,7 +429,9 @@ const authorizeServers = async (
   if (addCredentialsToBody && hasClientSecret) {
     formData.set('client_secret', flow['x-scalar-secret-client-secret'])
   }
-  if ('x-scalar-secret-redirect-uri' in flow && flow['x-scalar-secret-redirect-uri']) {
+  if (redirectUri) {
+    formData.set('redirect_uri', redirectUri)
+  } else if ('x-scalar-secret-redirect-uri' in flow && flow['x-scalar-secret-redirect-uri']) {
     formData.set('redirect_uri', flow['x-scalar-secret-redirect-uri'])
   }
 
@@ -387,7 +486,7 @@ const authorizeServers = async (
       : tokenUrl
 
     // Make the call
-    const resp = await fetch(url, {
+    const resp = await customFetch(url, {
       method: 'POST',
       headers,
       body: formData,
@@ -429,6 +528,8 @@ export const refreshOauth2Token = async (
   activeServer: ServerObject | null,
   /** Flattened environment variables used to resolve server URL templates */
   environmentVariables: Record<string, string> = {},
+  /** Fetch used for the refresh request; the desktop app passes an IPC-backed fetch so it leaves the renderer's network stack. */
+  customFetch: CustomFetch = fetch,
 ): Promise<ErrorResponse<OAuth2Tokens>> => {
   const flow = flows[type]
 
@@ -446,6 +547,7 @@ export const refreshOauth2Token = async (
   formData.set('refresh_token', refreshToken)
 
   const addCredentialsToBody = flow['x-scalar-credentials-location'] === 'body'
+  /** A confidential client keeps using its secret on refresh, even when PKCE is enabled. */
   const hasClientSecret = Boolean(flow['x-scalar-secret-client-secret'])
   /**
    * Public authorization-code clients still need client_id in the refresh body per RFC 6749 Section 6.
@@ -483,7 +585,7 @@ export const refreshOauth2Token = async (
       ? `${proxyUrl}?${new URLSearchParams([['scalar_url', absoluteRefreshUrl]]).toString()}`
       : absoluteRefreshUrl
 
-    const resp = await fetch(url, {
+    const resp = await customFetch(url, {
       method: 'POST',
       headers,
       body: formData,

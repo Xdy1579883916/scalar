@@ -5,6 +5,12 @@ import { findVariables } from '@scalar/helpers/regex/find-variables'
 
 import type { WorkspaceStore } from '@/client'
 import type { OperationEvents } from '@/events/definitions/operation'
+import {
+  deletePathItemOperation,
+  getPathItemOperation,
+  pathItemIsEmpty,
+  setPathItemOperation,
+} from '@/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@/helpers/get-resolved-ref'
 import { unpackProxyObject } from '@/helpers/unpack-proxy'
 import { syncParametersForPathChange } from '@/mutators/operation/helpers/sync-path-parameters'
@@ -12,6 +18,7 @@ import { getOperationEntries } from '@/navigation'
 import { getNavigationOptions } from '@/navigation/get-navigation-options'
 import { updateOrderIds } from '@/navigation/helpers/update-order-ids'
 import type { WorkspaceDocument } from '@/schemas'
+import { isOpenApiDocument } from '@/schemas/type-guards'
 
 /**
  * Creates a new operation at a specific path and method in the document.
@@ -34,7 +41,7 @@ export const createOperation = (
   payload: OperationEvents['operation:create:operation'],
 ): string | undefined => {
   const document = workspaceStore?.workspace.documents[payload.documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     payload.callback?.(false)
     return undefined
   }
@@ -58,7 +65,7 @@ export const createOperation = (
   preventPollution(method)
 
   /** Create the operation in the document */
-  document.paths[normalizedPath][method] = operation
+  setPathItemOperation(document.paths[normalizedPath], method, operation)
 
   // Make sure that we are selecting the new operation server
   const { servers } = operation
@@ -109,7 +116,7 @@ export const updateOperationMeta = (
   document: WorkspaceDocument | null,
   { meta, payload }: OperationEvents['operation:update:meta'],
 ) => {
-  if (!document || !store) {
+  if (!store || !isOpenApiDocument(document)) {
     return
   }
 
@@ -118,7 +125,7 @@ export const updateOperationMeta = (
     return
   }
 
-  const operation = getResolvedRef(document.paths?.[meta.path]?.[meta.method as HttpMethod])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method as HttpMethod))
   if (!operation) {
     console.error('Operation not found', { meta, document })
     return
@@ -168,19 +175,24 @@ export const updateOperationPathMethod = (
   const finalMethod = methodChanged ? method : meta.method
   const finalPath = pathChanged ? path : meta.path
 
-  // Check for conflicts at the target location
-  if (document?.paths?.[finalPath]?.[finalMethod as HttpMethod]) {
-    callback('conflict', blurTargetSelector)
-    return
-  }
-
-  const documentNavigation = document?.['x-scalar-navigation']
-  if (!documentNavigation || !store) {
+  if (!store || !isOpenApiDocument(document)) {
     console.error('Document or workspace not found', { document })
     return
   }
 
-  const operation = getResolvedRef(document.paths?.[meta.path]?.[meta.method as HttpMethod])
+  // Check for conflicts at the target location
+  if (getPathItemOperation(document.paths?.[finalPath], finalMethod as HttpMethod)) {
+    callback('conflict', blurTargetSelector)
+    return
+  }
+
+  const documentNavigation = document['x-scalar-navigation']
+  if (!documentNavigation) {
+    console.error('Document navigation missing', { document })
+    return
+  }
+
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[meta.path], meta.method as HttpMethod))
   if (!operation) {
     console.error('Operation not found', { meta, document })
     return
@@ -233,15 +245,14 @@ export const updateOperationPathMethod = (
   preventPollution(finalMethod)
 
   // Move the operation to the new location
-  document.paths[finalPath][finalMethod] = unpackProxyObject(operation)
+  setPathItemOperation(document.paths[finalPath], finalMethod as HttpMethod, unpackProxyObject(operation))
 
   // Remove the operation from the old location
-  const oldPathItems = document.paths[meta.path]
-  if (oldPathItems && isHttpMethod(meta.method)) {
-    delete oldPathItems[meta.method]
+  if (isHttpMethod(meta.method)) {
+    deletePathItemOperation(document.paths[meta.path], meta.method)
 
-    // If the old path has no more operations, remove the path entry
-    if (Object.keys(oldPathItems).length === 0) {
+    // If the old path is now empty, remove the path entry (path-level metadata is kept otherwise)
+    if (pathItemIsEmpty(document.paths[meta.path])) {
       delete document.paths[meta.path]
     }
   }
@@ -268,17 +279,17 @@ export const deleteOperation = (
   { meta, documentName }: OperationEvents['operation:delete:operation'],
 ) => {
   const document = workspace?.workspace.documents[documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
   preventPollution(meta.path)
   preventPollution(meta.method)
 
-  delete document.paths?.[meta.path]?.[meta.method]
+  deletePathItemOperation(document.paths?.[meta.path], meta.method)
 
-  // If the path has no more operations, remove the path entry
-  if (Object.keys(document.paths?.[meta.path] ?? {}).length === 0) {
+  // If the path is now empty, remove the path entry (path-level metadata is kept otherwise)
+  if (pathItemIsEmpty(document.paths?.[meta.path])) {
     delete document.paths?.[meta.path]
   }
 }
@@ -295,12 +306,12 @@ export const createOperationDraftExample = (
   { meta: { path, method }, documentName, exampleName }: OperationEvents['operation:create:draft-example'],
 ) => {
   const document = workspace?.workspace.documents[documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     console.error('Document not found', { documentName })
     return
   }
 
-  const operation = getResolvedRef(document.paths?.[path]?.[method])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[path], method))
   if (!operation) {
     console.error('Operation not found', { path, method })
     return
@@ -330,12 +341,12 @@ export const deleteOperationExample = (
 ) => {
   // Find the document in workspace based on documentName
   const document = workspace?.workspace.documents[documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
   // Get the operation object for the given path and method
-  const operation = getResolvedRef(document.paths?.[path]?.[method])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[path], method))
   if (!operation) {
     return
   }
@@ -393,11 +404,11 @@ export const renameOperationExample = (
   { meta: { path, method, exampleKey }, documentName, payload }: OperationEvents['operation:rename:example'],
 ) => {
   const document = workspace?.workspace.documents[documentName]
-  if (!document) {
+  if (!isOpenApiDocument(document)) {
     return
   }
 
-  const operation = getResolvedRef(document.paths?.[path]?.[method])
+  const operation = getResolvedRef(getPathItemOperation(document.paths?.[path], method))
   if (!operation) {
     return
   }

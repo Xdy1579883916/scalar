@@ -1,9 +1,10 @@
 <script lang="ts" setup>
 import {
   ScalarSidebarGroup,
+  ScalarSidebarGroupToggle,
   ScalarSidebarItem,
   ScalarSidebarSection,
-} from '@scalar/components'
+} from '@scalar/components/sidebar'
 import { LibraryIcon } from '@scalar/icons/library'
 import { computed } from 'vue'
 
@@ -17,7 +18,7 @@ import {
   type HoveredItem,
   type UseDraggableOptions,
 } from '@/hooks/use-draggable'
-import type { Item, Layout } from '@/types'
+import type { Item, Layout, SidebarOptions } from '@/types'
 
 import SidebarHttpBadge from './SidebarHttpBadge.vue'
 import SidebarItemLabel from './SidebarItemLabel.vue'
@@ -51,15 +52,7 @@ const {
    * Sidebar configuration options.
    * - operationTitleSource: sets whether operations show their path or summary as the display title.
    */
-  options?: Partial<{
-    operationTitleSource: 'path' | 'summary'
-    /**
-     * Whether to hide the default examples for operations if there are no other examples.
-     *
-     * @default false
-     */
-    hideOperationDefaultExamples: boolean
-  }>
+  options?: SidebarOptions
 
   /**
    * Prevents this item from being dragged.
@@ -239,14 +232,38 @@ const children = computed(() =>
       #aside>
       <SidebarHttpBadge
         :active="isSelected(item.id)"
-        class="mr-1 ml-2 h-4 self-start"
+        class="ml-2 h-4 self-start"
         :class="{
           // Hide the badge when we're showing the decorator
           'group-hover/button:opacity-0 group-focus-visible/button:opacity-0 group-has-[~*_[aria-expanded=true]]/button:opacity-0 group-has-[~*:focus-within]/button:opacity-0 group-has-[~*:hover]/button:opacity-0':
             slots.decorator,
         }"
+        :label="options?.labels?.httpMethod"
         :method="item.method"
         :webhook="item.type === 'webhook'" />
+    </template>
+    <!--
+      Hide the chevron
+    -->
+    <template
+      v-if="'method' in item"
+      #toggle>
+      <span class="hidden"></span>
+    </template>
+    <template
+      v-else
+      #toggle="{ open }">
+      <ScalarSidebarGroupToggle
+        class="text-sidebar-c-2"
+        :open>
+        <template #label>
+          {{
+            open
+              ? (options?.labels?.closeGroup ?? 'Close Group')
+              : (options?.labels?.openGroup ?? 'Open Group')
+          }}
+        </template>
+      </ScalarSidebarGroupToggle>
     </template>
     <template
       v-if="slots.decorator"
@@ -343,6 +360,7 @@ const children = computed(() =>
           'group-hover/button:opacity-0 group-focus-visible/button:opacity-0 group-has-[~*_[aria-expanded=true]]/button:opacity-0 group-has-[~*:focus-within]/button:opacity-0 group-has-[~*:hover]/button:opacity-0':
             slots.decorator,
         }"
+        :label="options?.labels?.httpMethod"
         :method="item.method"
         :webhook="item.type === 'webhook'" />
     </template>

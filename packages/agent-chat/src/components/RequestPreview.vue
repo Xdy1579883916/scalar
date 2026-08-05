@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ScalarCodeBlock } from '@scalar/components'
+import { ScalarCodeBlock } from '@scalar/components/code-block'
 import { ScalarIconCaretDown, ScalarIconCaretRight } from '@scalar/icons'
 import { type DeepPartial } from 'ai'
 import { computed, ref } from 'vue'
@@ -181,7 +181,7 @@ const displayMode = computed(() => {
 }
 
 .requestPreview {
-  border-radius: 12px;
+  border-radius: var(--scalar-radius-2xl);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -211,7 +211,7 @@ const displayMode = computed(() => {
   display: flex;
   flex-direction: column;
   font-size: var(--scalar-font-size-4);
-  border-radius: 12px;
+  border-radius: var(--scalar-radius-2xl);
   background: color-mix(
     in srgb,
     var(--scalar-background-2),

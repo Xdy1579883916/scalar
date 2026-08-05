@@ -2,6 +2,10 @@ using System.Diagnostics.CodeAnalysis;
 
 #if SCALAR_ASPIRE
 namespace Scalar.Aspire;
+#elif SCALAR_AZURE_FUNCTIONS
+namespace Scalar.Azure.Functions;
+#elif SCALAR_AWS_LAMBDA
+namespace Scalar.Aws.Lambda;
 #else
 namespace Scalar.AspNetCore;
 #endif
@@ -25,6 +29,13 @@ public partial class ScalarOptions
     /// The pattern can include the '{documentName}' placeholder which will be replaced with the document name.
     /// </summary>
     public string OpenApiRoutePattern { get; set; } = "/openapi/{documentName}.json";
+
+    /// <summary>
+    /// Controls the route pattern of the AsyncAPI document.
+    /// Can also be a complete URL to a remote AsyncAPI document, just be aware of CORS restrictions in this case.
+    /// The pattern can include the '{documentName}' placeholder which will be replaced with the document name.
+    /// </summary>
+    public string AsyncApiRoutePattern { get; set; } = "/asyncapi/{documentName}.json";
 
     /// <summary>
     /// Controls the proxy URL for API requests.
@@ -167,6 +178,15 @@ public partial class ScalarOptions
     /// </summary>
     /// <remarks>This list will override the servers defined in the OpenAPI document.</remarks>
     public IList<ScalarServer>? Servers { get; set; }
+
+    /// <summary>
+    /// Controls the URLs of ESM modules that provide additional API Reference plugins.
+    /// </summary>
+    /// <remarks>
+    /// Each module is imported in the browser before the API Reference mounts, and its default export
+    /// is registered as a plugin. The URLs must be reachable from the browser.
+    /// </remarks>
+    public IList<string>? PluginUrls { get; set; }
 
     /// <summary>
     /// Controls whether to expose 'dotnet' flag to the configuration.

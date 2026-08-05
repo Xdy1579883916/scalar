@@ -22,16 +22,19 @@ export default {}
 
 <script lang="ts" setup>
 import { ServerVariablesForm } from '@scalar/api-client/components/Server'
-import { ScalarMarkdown } from '@scalar/components'
+import { ScalarMarkdown } from '@scalar/components/markdown'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { useId } from 'vue'
+
+import { useLocalization } from '@/features/localization'
 
 import Selector from './Selector.vue'
 
 const { eventBus, servers, selectedServer } = defineProps<SelectorProps>()
 
 const id = useId()
+const { translate } = useLocalization()
 
 /** Update the selected server */
 const updateServer = (newServer: string) => {
@@ -65,7 +68,7 @@ const updateServerVariable = (key: string, value: string) => {
 <template>
   <label
     class="bg-b-2 flex h-8 items-center rounded-t-xl border-x border-t px-3 py-2.5 font-medium">
-    Server
+    {{ translate('server.label') }}
   </label>
   <div
     :id="id"

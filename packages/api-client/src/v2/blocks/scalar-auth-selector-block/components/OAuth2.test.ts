@@ -8,6 +8,7 @@ import { nextTick } from 'vue'
 import OAuth2 from '@/v2/blocks/scalar-auth-selector-block/components/OAuth2.vue'
 import OAuthScopesInput from '@/v2/blocks/scalar-auth-selector-block/components/OAuthScopesInput.vue'
 import RequestAuthDataTableInput from '@/v2/blocks/scalar-auth-selector-block/components/RequestAuthDataTableInput.vue'
+import type { CaptureOAuth2Callback } from '@/v2/blocks/scalar-auth-selector-block/helpers/oauth'
 
 describe('OAuth2', () => {
   const baseEnv = {
@@ -28,7 +29,9 @@ describe('OAuth2', () => {
       server: any
       proxyUrl: string
       scheme: any
-      configuration: Partial<ApiClientConfiguration>
+      configuration: Partial<ApiClientConfiguration> & {
+        captureOAuth2Callback?: CaptureOAuth2Callback
+      }
     }> = {},
   ) => {
     const flows =
@@ -59,6 +62,35 @@ describe('OAuth2', () => {
       },
     })
   }
+
+  it('hides the Authorize / Refresh / Clear actions when hideActions is set', () => {
+    const wrapper = mount(OAuth2, {
+      attachTo: document.body,
+      props: {
+        environment: baseEnv as any,
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: 'https://example.com/token',
+            refreshUrl: '',
+            'x-usePkce': 'no',
+            scopes: {},
+          },
+        } as any,
+        type: 'authorizationCode',
+        selectedScopes: [],
+        server: null,
+        proxyUrl: '',
+        scheme: { type: 'oauth2' } as any,
+        options: {},
+        eventBus,
+        name: 'OAuth2',
+        hideActions: true,
+      },
+    })
+
+    expect(wrapper.text()).not.toContain('Authorize')
+  })
 
   it('renders Access Token view when token is present and supports clearing', async () => {
     const wrapper = mountWithProps({
@@ -286,6 +318,36 @@ describe('OAuth2', () => {
       },
       name: 'OAuth2',
     })
+  })
+
+  it('does not persist a redirect URI when captureOAuth2Callback is provided', async () => {
+    const emitted = vi.fn()
+    eventBus.on('auth:update:security-scheme-secrets', emitted)
+
+    mountWithProps({
+      configuration: {
+        oauth2RedirectUri: 'http://127.0.0.1',
+        captureOAuth2Callback: vi.fn(),
+      },
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          'x-scalar-secret-token': '',
+          'x-usePkce': 'no',
+          'x-scalar-secret-redirect-uri': '',
+          scopes: {},
+          'x-scalar-secret-client-id': '',
+          'x-scalar-secret-client-secret': '',
+        },
+      },
+    })
+
+    await nextTick()
+
+    // The desktop loopback path owns the redirect URI at runtime, so nothing is
+    // written into the document.
+    expect(emitted).not.toHaveBeenCalled()
   })
 
   it('does not pre-fill redirect URI on file protocol without config override', async () => {
@@ -526,6 +588,73 @@ describe('OAuth2', () => {
 
     await nextTick()
     expect(emitted).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows Client Secret for authorization code when PKCE uses SHA-256', async () => {
+    const wrapper = mountWithProps({
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          refreshUrl: 'https://example.com/token',
+          'x-usePkce': 'SHA-256',
+          scopes: {},
+          'x-scalar-secret-client-id': 'client-id',
+          'x-scalar-secret-client-secret': 'stored-secret',
+          'x-scalar-secret-token': '',
+          'x-scalar-secret-redirect-uri': 'https://app.example/callback',
+        },
+      },
+    })
+
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Client ID')
+    expect(wrapper.text()).toContain('Client Secret')
+  })
+
+  it('shows Client Secret for authorization code when PKCE uses plain', async () => {
+    const wrapper = mountWithProps({
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          refreshUrl: 'https://example.com/token',
+          'x-usePkce': 'plain',
+          scopes: {},
+          'x-scalar-secret-client-id': 'client-id',
+          'x-scalar-secret-client-secret': 'stored-secret',
+          'x-scalar-secret-token': '',
+          'x-scalar-secret-redirect-uri': 'https://app.example/callback',
+        },
+      },
+    })
+
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Client Secret')
+  })
+
+  it('shows Client Secret for authorization code when PKCE is disabled', async () => {
+    const wrapper = mountWithProps({
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          refreshUrl: 'https://example.com/token',
+          'x-usePkce': 'no',
+          scopes: {},
+          'x-scalar-secret-client-id': 'client-id',
+          'x-scalar-secret-client-secret': '',
+          'x-scalar-secret-token': '',
+          'x-scalar-secret-redirect-uri': 'https://app.example/callback',
+        },
+      },
+    })
+
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Client Secret')
   })
 
   it('emits clear security scheme secrets for openIdConnect flow', async () => {

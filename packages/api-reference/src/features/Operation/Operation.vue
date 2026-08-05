@@ -16,6 +16,7 @@ export type OperationProps = {
     | 'layout'
     | 'orderRequiredPropertiesFirst'
     | 'orderSchemaPropertiesBy'
+    | 'expandAllSchemaProperties'
     | 'showOperationId'
   >
   /** Document object */
@@ -36,6 +37,8 @@ export type OperationProps = {
   isWebhook: boolean
   /** The currently selected client for the document */
   selectedClient: WorkspaceStore['workspace']['x-scalar-default-client']
+  /** The currently selected example key, shared across operations for in-sync example pickers */
+  selectedExample: WorkspaceStore['workspace']['x-scalar-default-example']
   /** The event bus */
   eventBus: WorkspaceEventBus
   /** The auth store */
@@ -44,12 +47,13 @@ export type OperationProps = {
 </script>
 
 <script lang="ts" setup>
-import type { ClientOptionGroup } from '@scalar/api-client/blocks/operation-code-sample'
+import type { ClientOptionGroup } from '@scalar/blocks/code-example'
 import type { HttpMethod } from '@scalar/helpers/http/http-methods'
 import type { ApiReferenceConfigurationRaw } from '@scalar/types/api-reference'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import type { AuthStore } from '@scalar/workspace-store/entities/auth'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
+import { getFirstServer } from '@scalar/workspace-store/helpers/get-first-server'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import {
   combineParams,
@@ -64,7 +68,6 @@ import { computed } from 'vue'
 
 import { filterSelectedSecurity } from '@/features/Operation/helpers/filter-selected-security'
 
-import { getFirstServer } from './helpers/get-first-server'
 import {
   getRequiredSecurity,
   type RequiredSecurity,
@@ -148,6 +151,7 @@ const selectedSecuritySchemes = computed(() =>
       v-if="options.layout === 'classic'"
       :id
       :clientOptions
+      :document
       :eventBus
       :isCollapsed
       :isWebhook
@@ -157,12 +161,14 @@ const selectedSecuritySchemes = computed(() =>
       :path
       :requiredSecurity
       :selectedClient
+      :selectedExample
       :selectedSecuritySchemes
       :selectedServer />
     <ModernLayout
       v-else
       :id
       :clientOptions
+      :document
       :eventBus
       :isWebhook
       :method
@@ -171,6 +177,7 @@ const selectedSecuritySchemes = computed(() =>
       :path
       :requiredSecurity
       :selectedClient
+      :selectedExample
       :selectedSecuritySchemes
       :selectedServer />
   </template>

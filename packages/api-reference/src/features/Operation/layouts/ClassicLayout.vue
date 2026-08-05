@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { OperationCodeSample } from '@scalar/api-client/blocks/operation-code-sample'
-import {
-  ScalarErrorBoundary,
-  ScalarIconButton,
-  ScalarMarkdown,
-} from '@scalar/components'
+import { CodeExample } from '@scalar/blocks/code-example'
+import { ScalarErrorBoundary } from '@scalar/components/error-boundary'
+import { ScalarIconButton } from '@scalar/components/icon-button'
+import { ScalarMarkdown } from '@scalar/components/markdown'
 import {
   ScalarIconCopy,
   ScalarIconPlay,
@@ -14,6 +12,7 @@ import { useClipboard } from '@scalar/use-hooks/useClipboard'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import type { SecuritySchemeObjectSecret } from '@scalar/workspace-store/request-example'
 import type {
+  OpenApiDocument,
   OperationObject,
   ServerObject,
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
@@ -27,11 +26,16 @@ import OperationPath from '@/components/OperationPath.vue'
 import { SectionAccordion } from '@/components/Section'
 import { ExampleResponses } from '@/features/example-responses'
 import { ExternalDocs } from '@/features/external-docs'
+import { useLocalization } from '@/features/localization'
 import Callbacks from '@/features/Operation/components/callbacks/Callbacks.vue'
 import OperationParameters from '@/features/Operation/components/OperationParameters.vue'
 import OperationResponses from '@/features/Operation/components/OperationResponses.vue'
+import OperationScopes from '@/features/Operation/components/OperationScopes.vue'
 import SecurityRequirementBadge from '@/features/Operation/components/SecurityRequirementBadge.vue'
-import type { RequiredSecurity } from '@/features/Operation/helpers/get-required-security'
+import {
+  getRequiredScopeGroups,
+  type RequiredSecurity,
+} from '@/features/Operation/helpers/get-required-security'
 import {
   getOperationStability,
   getOperationStabilityColor,
@@ -49,6 +53,7 @@ import { XBadges } from '@/features/x-badges'
 
 const {
   clientOptions,
+  document,
   eventBus,
   isWebhook,
   method,
@@ -59,6 +64,7 @@ const {
   selectedServer,
   selectedSecuritySchemes,
   selectedClient,
+  selectedExample,
 } = defineProps<
   Omit<
     OperationProps,
@@ -72,17 +78,32 @@ const {
     selectedSecuritySchemes: SecuritySchemeObjectSecret[]
     /** Required/optional security state for the badge next to the path */
     requiredSecurity: RequiredSecurity
+    /** The document the operation belongs to, used to resolve schema references for display */
+    document?: OpenApiDocument
   }
 >()
+const { translate } = useLocalization()
 
 const operationTitle = computed(() => operation.summary || path || '')
 const operationExtensions = computed(() => getXKeysFromObject(operation))
 
-/** Track the currently selected example for passing to the modal */
-const selectedExampleKey = ref<string>('')
+/** Whether the operation requires any OAuth scopes, used to skip the empty card item. */
+const hasRequiredScopes = computed(
+  () => getRequiredScopeGroups(requiredSecurity).length > 0,
+)
 
 /** Track the selected request body content type so the code sample stays in sync */
 const selectedRequestBodyContentType = ref<string | undefined>()
+
+/**
+ * The example key actually shown in the request snippet for this operation.
+ *
+ * The test-request button lives in the accordion header, outside `OperationCodeSample`, so it
+ * cannot read the resolved key from the footer slot like the modern layout does. We mirror it here
+ * so the button opens the client with the same example the snippet displays, even when this
+ * operation does not share the document-wide selection.
+ */
+const resolvedExampleKey = ref<string>('')
 
 /** Selected request body oneOf/anyOf variants; synced with schema dropdowns and code sample */
 const requestBodyCompositionSelection = ref<RequestBodyCompositionSelection>({})
@@ -142,7 +163,8 @@ const { copyToClipboard } = useClipboard()
               <Badge
                 v-if="isWebhook"
                 class="font-code text-green flex w-fit items-center justify-center gap-1">
-                <ScalarIconWebhooksLogo weight="bold" />Webhook
+                <ScalarIconWebhooksLogo weight="bold" />
+                {{ translate('operation.webhook') }}
               </Badge>
 
               <!-- x-badges before -->
@@ -168,7 +190,7 @@ const { copyToClipboard } = useClipboard()
           v-if="active && !isWebhook"
           :id
           :eventBus
-          :exampleName="selectedExampleKey"
+          :exampleName="resolvedExampleKey"
           :method
           :path
           :requestBodyCompositionSelection="
@@ -186,7 +208,7 @@ const { copyToClipboard } = useClipboard()
       <ScalarIconButton
         class="endpoint-copy p-0.5"
         :icon="ScalarIconCopy"
-        label="Copy endpoint URL"
+        :label="translate('actions.copyEndpointUrl')"
         size="xs"
         variant="ghost"
         @click.stop="copyToClipboard(path)" />
@@ -196,7 +218,7 @@ const { copyToClipboard } = useClipboard()
       #description>
       <ScalarMarkdown
         :anchorPrefix="id"
-        aria-label="Operation Description"
+        :aria-label="translate('common.description')"
         role="group"
         transformType="heading"
         :value="operation.description"
@@ -210,9 +232,15 @@ const { copyToClipboard } = useClipboard()
           class="operation-details-card-item">
           <SpecificationExtension :value="operationExtensions" />
         </div>
+        <div
+          v-if="hasRequiredScopes"
+          class="operation-details-card-item">
+          <OperationScopes :requiredSecurity />
+        </div>
         <div class="operation-details-card-item">
           <OperationParameters
             v-model:selectedContentType="selectedRequestBodyContentType"
+            :document
             :eventBus
             :options
             :parameters="operation.parameters"
@@ -220,6 +248,7 @@ const { copyToClipboard } = useClipboard()
         </div>
         <div class="operation-details-card-item">
           <OperationResponses
+            :document
             :eventBus
             :options
             :responses="operation.responses" />
@@ -231,6 +260,7 @@ const { copyToClipboard } = useClipboard()
           class="operation-details-card-item">
           <Callbacks
             :callbacks="operation.callbacks"
+            :document
             :eventBus
             :options
             :path />
@@ -240,7 +270,9 @@ const { copyToClipboard } = useClipboard()
       <ExampleResponses
         v-if="operation.responses"
         class="operation-example-card"
-        :responses="operation.responses" />
+        :eventBus
+        :responses="operation.responses"
+        :selectedExample />
 
       <!-- New Example Request -->
       <div>
@@ -250,9 +282,8 @@ const { copyToClipboard } = useClipboard()
         </LinkList>
         <!-- Request Example -->
         <ScalarErrorBoundary>
-          <OperationCodeSample
+          <CodeExample
             :key="requestBodyCompositionSelectionKey"
-            v-model:selectedExample="selectedExampleKey"
             class="operation-example-card"
             :clientOptions
             :eventBus
@@ -267,7 +298,9 @@ const { copyToClipboard } = useClipboard()
             :securitySchemes="selectedSecuritySchemes"
             :selectedClient
             :selectedContentType="selectedRequestBodyContentType"
-            :selectedServer />
+            :selectedExample
+            :selectedServer
+            @update:exampleKey="resolvedExampleKey = $event" />
         </ScalarErrorBoundary>
       </div>
     </div>

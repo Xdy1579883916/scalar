@@ -4,21 +4,21 @@
   and provides functionality to create new workspaces with namespace support.
 -->
 <script setup lang="ts">
+import { ScalarButton } from '@scalar/components/button'
 import {
-  ScalarButton,
   ScalarDropdown,
   ScalarDropdownDivider,
   ScalarDropdownItem,
-  ScalarIcon,
-  useModal,
-  type ScalarListboxOption,
-  type WorkspaceGroup,
-} from '@scalar/components'
+} from '@scalar/components/dropdown'
+import { ScalarIcon } from '@scalar/components/icon'
+import { type ScalarListboxOption } from '@scalar/components/listbox'
+import { type WorkspaceGroup } from '@scalar/components/menu'
+import { useModal } from '@scalar/components/modal'
 
 import { CreateWorkspaceModal } from '@/features/app'
 import { type CreateWorkspacePayload } from '@/features/import-listener/types'
 
-const { workspaceGroups: worksapceGroups, activeWorkspace } = defineProps<{
+const { workspaceGroups, activeWorkspace } = defineProps<{
   /** List of workspace groups */
   workspaceGroups: WorkspaceGroup[]
   /** The active workspace */
@@ -53,7 +53,7 @@ const createWorkspaceModal = useModal()
       <!-- Workspace list -->
       <template #items>
         <template
-          v-for="group in worksapceGroups"
+          v-for="group in workspaceGroups"
           :key="group.label">
           <!-- If the group has children, render as a group -->
           <template v-if="group.options && group.options.length > 0">

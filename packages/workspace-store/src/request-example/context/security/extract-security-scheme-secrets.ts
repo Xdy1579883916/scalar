@@ -1,7 +1,15 @@
 import { isObject } from '@scalar/helpers/object/is-object'
 import { objectEntries } from '@scalar/helpers/object/object-entries'
 import type { SecurityScheme } from '@scalar/types/entities'
-import type { AuthStore, SecretsOAuthFlows, SecretsOpenIdConnect } from '@scalar/workspace-store/entities/auth'
+import type {
+  AuthStore,
+  SecretsEncryption,
+  SecretsGssapi,
+  SecretsOAuthFlows,
+  SecretsOpenIdConnect,
+  SecretsSasl,
+  SecretsX509,
+} from '@scalar/workspace-store/entities/auth'
 import type { DeepPartial } from '@scalar/workspace-store/helpers/overrides-proxy'
 import type { XScalarCredentialsLocation } from '@scalar/workspace-store/schemas/extensions/security/x-scalar-credentials-location'
 import type {
@@ -12,8 +20,11 @@ import type {
 } from '@scalar/workspace-store/schemas/v3.1/strict/oauth-flow'
 import type { SecuritySchemeObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 
+import { isEncryptionSchemeType, isSaslSchemeType } from '@/request-example/builder/security/broker-scheme-types'
 import type {
   ApiKeyObjectSecret,
+  EncryptionObjectSecret,
+  GssapiObjectSecret,
   HttpObjectSecret,
   OAuth2ObjectSecret,
   OAuthFlowAuthorizationCodeSecret,
@@ -22,7 +33,9 @@ import type {
   OAuthFlowPasswordSecret,
   OAuthFlowsObjectSecret,
   OpenIdConnectObjectSecret,
+  SaslObjectSecret,
   SecuritySchemeObjectSecret,
+  X509ObjectSecret,
 } from '@/request-example/builder/security/secret-types'
 
 /** A combined scheme that includes both the auth store secrets and a deep partial of the config auth */
@@ -47,6 +60,7 @@ const mergeFlowSecrets = <const T extends readonly (keyof typeof SECRET_TO_INPUT
   properties: T,
   configSecrets: Record<string, unknown>,
   authStoreSecrets: Record<string, unknown> = {},
+  oauth2RedirectUri?: string,
 ): Record<T[number], string> =>
   Object.fromEntries(
     properties.map((property) => {
@@ -60,14 +74,25 @@ const mergeFlowSecrets = <const T extends readonly (keyof typeof SECRET_TO_INPUT
           ? configSecrets[SECRET_TO_INPUT_FIELD_MAP[property]]
           : undefined
 
+      // oauth2RedirectUri (top-level config option) is used as a global fallback for the redirect URI,
+      // applied only when neither the auth store nor per-scheme config have a value. This ensures
+      // the configured redirect URI persists when switching between documents with the same OAuth config,
+      // because each document starts with no stored redirect URI (authStoreValue === undefined).
       const value =
         property === 'x-scalar-secret-redirect-uri'
-          ? (authStoreValue ?? configValue ?? configInputValue ?? '')
+          ? (authStoreValue ?? configValue ?? configInputValue ?? oauth2RedirectUri ?? '')
           : authStoreValue || configValue || configInputValue || ''
 
       return [property, value]
     }),
   ) as Record<T[number], string>
+
+/** Secret extensions are not part of the strict scheme types, so they are read the same way the OAuth flows read theirs */
+const documentSecret = (scheme: SecuritySchemeObject, property: keyof typeof SECRET_TO_INPUT_FIELD_MAP): string => {
+  const value = (scheme as Record<string, unknown>)[property]
+
+  return typeof value === 'string' ? value : ''
+}
 
 const extractRefreshTokenSecret = (
   authStoreSecrets: { 'x-scalar-secret-refresh-token'?: string } = {},
@@ -101,6 +126,7 @@ const extractCredentialsLocation = (
 const extractOAuthFlowSecrets = (
   flows: Record<string, unknown> | undefined,
   storeSecrets?: Partial<SecretsOAuthFlows> | Partial<SecretsOpenIdConnect>,
+  oauth2RedirectUri?: string,
 ): {
   flows: OAuthFlowsObjectSecret
   selectedScopes: string[]
@@ -131,6 +157,7 @@ const extractOAuthFlowSecrets = (
           ],
           flow,
           storeSecrets?.implicit,
+          oauth2RedirectUri,
         ),
         ...extractRefreshTokenSecret(storeSecrets?.implicit),
       } satisfies OAuthFlowImplicitSecret
@@ -191,6 +218,7 @@ const extractOAuthFlowSecrets = (
           ],
           flow,
           storeSecrets?.authorizationCode,
+          oauth2RedirectUri,
         ),
         ...extractCredentialsLocation(flow, storeSecrets?.authorizationCode),
         ...extractRefreshTokenSecret(storeSecrets?.authorizationCode),
@@ -210,15 +238,30 @@ export const extractSecuritySchemeSecrets = (
   authStore: AuthStore,
   name: string,
   documentSlug: string,
+  oauth2RedirectUri?: string,
 ): SecuritySchemeObjectSecret => {
   const secrets = authStore.getAuthSecrets(documentSlug, name)
+
+  // AsyncAPI broker schemes live outside the OpenAPI `SecuritySchemeObject` union, so their type
+  // (and any config credential fields) are read through this alias. Captured before the OpenAPI
+  // branches below, where `scheme` gets narrowed to `never` once all four OpenAPI types are handled.
+  const brokerScheme = scheme as {
+    type?: string
+    username?: string
+    password?: string
+    token?: string
+  } & Record<string, unknown>
 
   // Handle API Key security schemes
   if (scheme.type === 'apiKey') {
     const storeSecrets = secrets?.type === 'apiKey' ? secrets : undefined
     return {
       ...scheme,
-      'x-scalar-secret-token': storeSecrets?.['x-scalar-secret-token'] || scheme.value || '',
+      'x-scalar-secret-token':
+        storeSecrets?.['x-scalar-secret-token'] ||
+        documentSecret(scheme, 'x-scalar-secret-token') ||
+        scheme.value ||
+        '',
     } satisfies ApiKeyObjectSecret
   }
 
@@ -227,16 +270,28 @@ export const extractSecuritySchemeSecrets = (
     const storeSecrets = secrets?.type === 'http' ? secrets : undefined
     return {
       ...scheme,
-      'x-scalar-secret-token': storeSecrets?.['x-scalar-secret-token'] || scheme.token || '',
-      'x-scalar-secret-username': storeSecrets?.['x-scalar-secret-username'] || scheme.username || '',
-      'x-scalar-secret-password': storeSecrets?.['x-scalar-secret-password'] || scheme.password || '',
+      'x-scalar-secret-token':
+        storeSecrets?.['x-scalar-secret-token'] ||
+        documentSecret(scheme, 'x-scalar-secret-token') ||
+        scheme.token ||
+        '',
+      'x-scalar-secret-username':
+        storeSecrets?.['x-scalar-secret-username'] ||
+        documentSecret(scheme, 'x-scalar-secret-username') ||
+        scheme.username ||
+        '',
+      'x-scalar-secret-password':
+        storeSecrets?.['x-scalar-secret-password'] ||
+        documentSecret(scheme, 'x-scalar-secret-password') ||
+        scheme.password ||
+        '',
     } satisfies HttpObjectSecret
   }
 
   // Handle OAuth2 security schemes and all supported flows
   if (scheme.type === 'oauth2') {
     const storeSecrets = secrets?.type === 'oauth2' ? secrets : undefined
-    const extracted = extractOAuthFlowSecrets(scheme.flows, storeSecrets)
+    const extracted = extractOAuthFlowSecrets(scheme.flows, storeSecrets, oauth2RedirectUri)
     const configuredDefaultScopes = Array.isArray(scheme['x-default-scopes'])
       ? scheme['x-default-scopes'].filter((scope): scope is string => typeof scope === 'string')
       : []
@@ -260,12 +315,52 @@ export const extractSecuritySchemeSecrets = (
         authorizationCode: storeSecrets?.authorizationCode,
       },
       storeSecrets,
+      oauth2RedirectUri,
     )
 
     return {
       ...scheme,
       ...(objectEntries(extracted.flows).length ? { flows: extracted.flows } : {}),
     } as OpenIdConnectObjectSecret
+  }
+
+  // SASL-style schemes (userPassword, plain, scramSha256, scramSha512): username + password,
+  // with the same config fallbacks as HTTP basic.
+  if (isSaslSchemeType(brokerScheme.type)) {
+    const storeSecrets = secrets?.type === brokerScheme.type ? (secrets as SecretsSasl) : undefined
+    return {
+      ...brokerScheme,
+      'x-scalar-secret-username': storeSecrets?.['x-scalar-secret-username'] || brokerScheme.username || '',
+      'x-scalar-secret-password': storeSecrets?.['x-scalar-secret-password'] || brokerScheme.password || '',
+    } as SaslObjectSecret
+  }
+
+  // X509: a client certificate + private key pair (PEM), stored in the auth store only.
+  if (brokerScheme.type === 'X509') {
+    const storeSecrets = secrets?.type === 'X509' ? (secrets as SecretsX509) : undefined
+    return {
+      ...brokerScheme,
+      'x-scalar-secret-client-certificate': storeSecrets?.['x-scalar-secret-client-certificate'] || '',
+      'x-scalar-secret-private-key': storeSecrets?.['x-scalar-secret-private-key'] || '',
+    } as X509ObjectSecret
+  }
+
+  // Encryption schemes (symmetricEncryption, asymmetricEncryption): a single key value in the token slot.
+  if (isEncryptionSchemeType(brokerScheme.type)) {
+    const storeSecrets = secrets?.type === brokerScheme.type ? (secrets as SecretsEncryption) : undefined
+    return {
+      ...brokerScheme,
+      'x-scalar-secret-token': storeSecrets?.['x-scalar-secret-token'] || brokerScheme.token || '',
+    } as EncryptionObjectSecret
+  }
+
+  // GSSAPI (Kerberos): the service name the client authenticates against.
+  if (brokerScheme.type === 'gssapi') {
+    const storeSecrets = secrets?.type === 'gssapi' ? (secrets as SecretsGssapi) : undefined
+    return {
+      ...brokerScheme,
+      'x-scalar-secret-service-name': storeSecrets?.['x-scalar-secret-service-name'] || '',
+    } as GssapiObjectSecret
   }
 
   return scheme as SecuritySchemeObjectSecret

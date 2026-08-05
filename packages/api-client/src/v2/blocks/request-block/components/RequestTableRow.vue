@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ScalarButton, ScalarIcon, ScalarIconButton } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarIcon } from '@scalar/components/icon'
+import { ScalarIconButton } from '@scalar/components/icon-button'
 import { ScalarIconGlobe, ScalarIconTrash } from '@scalar/icons'
 import type { ApiReferenceEvents } from '@scalar/workspace-store/events'
 import { unpackProxyObject } from '@scalar/workspace-store/helpers/unpack-proxy'
@@ -13,7 +15,7 @@ import { computed, ref, watch } from 'vue'
 
 import { getFileName } from '@/v2/blocks/request-block/helpers/files'
 import { validateParameter } from '@/v2/blocks/request-block/helpers/validate-parameter'
-import { CodeInput } from '@/v2/components/code-input'
+import { CodeInputLite } from '@/v2/components/code-input'
 import {
   DataTableCell,
   DataTableCheckbox,
@@ -50,6 +52,13 @@ export type TableRow = {
   sourceParameterValuePath?: string[]
 }
 
+export type TableRowUpsertPayload = {
+  name: string
+  value: string | File
+  isDisabled: boolean
+  shouldRenameExpandedRow?: boolean
+}
+
 const {
   data,
   environment,
@@ -66,10 +75,7 @@ const {
 }>()
 
 const emit = defineEmits<{
-  (
-    e: 'upsertRow',
-    payload: { name: string; value: string | File; isDisabled: boolean },
-  ): void
+  (e: 'upsertRow', payload: TableRowUpsertPayload): void
   (e: 'deleteRow'): void
   (e: 'uploadFile'): void
   (e: 'removeFile'): void
@@ -137,12 +143,6 @@ const enumValue = computed<string[]>(() => {
   return []
 })
 
-const minimumValue = computed(() =>
-  data.schema && 'minimum' in data.schema ? data.schema.minimum : undefined,
-)
-const maximumValue = computed(() =>
-  data.schema && 'maximum' in data.schema ? data.schema.maximum : undefined,
-)
 const typeValue = computed(() =>
   data.schema && 'type' in data.schema ? data.schema.type : undefined,
 )
@@ -154,6 +154,7 @@ const validationResult = computed(() =>
 /** Handle row updates while preserving existing properties */
 const handleUpdateRow = (
   payload: Partial<{ name: string; value: string; isDisabled: boolean }>,
+  options: { shouldRenameExpandedRow?: boolean } = {},
 ): void => {
   // Update our local state
   if (payload.name !== undefined) {
@@ -163,15 +164,45 @@ const handleUpdateRow = (
     value.value = payload.value
   }
 
-  // Is disabled should always be false unless you explicitly set it to true
-  isDisabled.value = payload.isDisabled ?? false
+  // Is disabled should only be updated when explicitly provided in the payload
+  if (payload.isDisabled !== undefined) {
+    isDisabled.value = payload.isDisabled
+  }
+
+  if (
+    payload.name !== undefined &&
+    data.sourceParameterValuePath &&
+    !options.shouldRenameExpandedRow
+  ) {
+    return
+  }
 
   // Emit all of the local state
   emit('upsertRow', {
     name: name.value,
     value: value.value,
     isDisabled: isDisabled.value,
+    ...(options.shouldRenameExpandedRow
+      ? { shouldRenameExpandedRow: true }
+      : {}),
   })
+}
+
+/**
+ * Commit a key edit when the input loses focus. Expanded-object rows defer their rename to blur (see
+ * handleUpdateRow), so we only emit when the key actually changed — focusing and blurring the field
+ * without typing should not re-emit the row or silently reset its disabled state. The current
+ * disabled state is passed through so a renamed row keeps it.
+ */
+const handleKeyBlur = (newName: string): void => {
+  if (newName === data.name) {
+    return
+  }
+
+  handleUpdateRow(
+    { name: newName, isDisabled: isDisabled.value },
+    { shouldRenameExpandedRow: Boolean(data.sourceParameterValuePath) },
+  )
 }
 </script>
 
@@ -183,6 +214,7 @@ const handleUpdateRow = (
       error: validationResult.ok === false && invalidParams?.has(data.name),
     }">
     <DataTableCheckbox
+      :ariaLabel="`Include ${data.name || 'row'} in request`"
       class="!border-r"
       :disabled="hasCheckboxDisabled ?? false"
       :modelValue="!isDisabled"
@@ -190,41 +222,31 @@ const handleUpdateRow = (
 
     <!-- Name -->
     <DataTableCell>
-      <CodeInput
+      <CodeInputLite
         :aria-label="`${label} Key`"
-        disableCloseBrackets
         :disabled="data.isReadonly"
-        disableEnter
-        disableTabIndent
         :environment="environment"
-        lineWrapping
         :modelValue="name"
         placeholder="Key"
         :required="Boolean(data.isRequired)"
+        @blur="(v) => handleKeyBlur(v)"
         @navigate="(route) => emit('navigate', route)"
-        @selectVariable="(v: string) => handleUpdateRow({ name: v })"
         @update:modelValue="(v) => handleUpdateRow({ name: v })" />
     </DataTableCell>
 
     <!-- Value -->
     <DataTableCell>
-      <CodeInput
+      <CodeInputLite
         :aria-label="`${label} Value`"
-        class="pr-6 group-hover:pr-10 group-has-[.cm-focused]:pr-10"
+        class="pr-6 group-hover:pr-10 group-has-[.code-input-lite__editor:focus]:pr-10"
         :default="defaultValue"
-        disableCloseBrackets
         :disabled="data.isReadonly"
-        disableEnter
-        disableTabIndent
         :enum="enumValue"
         :environment="environment"
         :examples="
           data.schema?.examples?.map((example) => String(example)) ?? []
         "
         :linethrough="data.isOverridden"
-        lineWrapping
-        :max="maximumValue"
-        :min="minimumValue"
         :modelValue="displayValue"
         :placeholder="data.description || 'Value'"
         :type="typeValue"
@@ -238,7 +260,8 @@ const handleUpdateRow = (
               !data.isRequired &&
               data.isReadonly !== true
             "
-            class="text-c-2 hover:text-c-1 hover:bg-b-2 z-context -mr-0.5 hidden h-fit rounded p-1 group-hover:flex group-has-[.cm-focused]:flex"
+            :aria-label="`Delete ${data.name || 'row'}`"
+            class="text-c-2 hover:text-c-1 hover:bg-b-2 z-context -mr-0.5 hidden h-fit rounded p-1 group-hover:flex group-has-[.code-input-lite__editor:focus]:flex"
             size="sm"
             variant="ghost"
             @click="emit('deleteRow')">
@@ -265,7 +288,7 @@ const handleUpdateRow = (
             :schema="data.schema"
             :value />
         </template>
-      </CodeInput>
+      </CodeInputLite>
     </DataTableCell>
 
     <!-- File upload -->
@@ -274,8 +297,12 @@ const handleUpdateRow = (
       class="group/upload flex items-center justify-center whitespace-nowrap">
       <template v-if="isFile">
         <div
-          class="text-c-2 filemask flex w-full max-w-[100%] items-center justify-center overflow-hidden p-1">
-          <span>{{ displayValue }}</span>
+          class="text-c-2 flex w-full max-w-[100%] items-center justify-center overflow-hidden p-1">
+          <span
+            class="truncate"
+            :title="displayValue"
+            >{{ displayValue }}</span
+          >
         </div>
         <button
           class="bg-b-2 mt-1 block rounded p-0.5 text-center text-xs font-medium md:pointer-events-none md:absolute md:inset-x-1 md:top-1/2 md:mt-0 md:-translate-y-1/2 md:opacity-0 md:group-hover/upload:pointer-events-auto md:group-hover/upload:opacity-100"

@@ -1,4 +1,4 @@
-import { type Static, any, array, fn, object, optional, record, string, unknown } from '@scalar/validation'
+import { type Static, any, array, boolean, fn, object, optional, record, string, unknown } from '@scalar/validation'
 
 const openApiExtensionSchema = object({
   name: string({
@@ -26,17 +26,29 @@ const viewComponentSchema = object({
   props: optional(record(string(), any()), {
     typeComment: 'Additional props to pass to the component',
   }),
+  sidebar: optional(
+    object({
+      show: boolean(),
+      label: string(),
+    }),
+    {
+      typeComment: 'Sidebar configuration. Set show: true to display in sidebar.',
+    },
+  ),
 })
 
 const viewsSchema = object({
+  'content.start': optional(array(viewComponentSchema), {
+    typeComment: 'Components to render before the Introduction/Info section',
+  }),
   'content.end': optional(array(viewComponentSchema), {
     typeComment: 'Components to render at specific views in the API Reference',
   }),
 })
 
 const lifecycleHooksSchema = object({
-  onInit: optional(fn<({ config }: { config: any }) => void>()),
-  onConfigChange: optional(fn<({ config }: { config: any }) => void>()),
+  onInit: optional(fn<({ config, auth }: { config: any; auth: any }) => void>()),
+  onConfigChange: optional(fn<({ config, auth }: { config: any; auth: any }) => void>()),
   onDestroy: optional(fn<() => void>()),
 })
 

@@ -1,13 +1,23 @@
 import { type ZodType, z } from 'zod'
 
-import type { TargetId } from '../snippetz'
+import type { AvailableClient, ClientId, TargetId } from '../snippetz'
 import { apiReferencePluginSchema } from './api-reference-plugin'
 import type { AuthenticationConfiguration } from './authentication-configuration'
 import { NEW_PROXY_URL, OLD_PROXY_URL, baseConfigurationSchema } from './base-configuration'
 import { type SourceConfiguration, sourceConfigurationSchema } from './source-configuration'
+import type { ApiReferenceLocalization } from './types'
+import { DEFAULT_MODELS_SECTION_LABEL } from './types'
 
 // Zod Schemas don't work well with async functions, so we use a custom type instead.
 const fetchLikeSchema = z.custom<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>()
+
+const apiReferenceLocalizationSchema = z
+  .object({
+    locale: z.string().optional(),
+    direction: z.enum(['ltr', 'rtl', 'auto']).optional().catch('auto'),
+    translations: z.record(z.string(), z.unknown()).optional(),
+  })
+  .optional() as ZodType<ApiReferenceLocalization | undefined>
 
 /**
  * Standard configuration for the Api Reference.
@@ -34,27 +44,64 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
    * Custom fetch function for custom logic
    *
    * Can be used to add custom headers, handle auth, etc.
+   *
+   * @deprecated Use `customFetch` instead.
    */
   fetch: fetchLikeSchema.optional(),
+  /**
+   * Custom fetch function used both when loading the OpenAPI document and when sending requests from the API client.
+   *
+   * Can be used to add custom headers, attach credentials (for example `credentials: 'include'`), handle auth, etc.
+   */
+  customFetch: fetchLikeSchema.optional(),
   /**
    * Plugins for the API reference
    */
   plugins: z.array(apiReferencePluginSchema).optional(),
+  /**
+   * URLs of ESM modules that provide additional plugins for the API reference.
+   *
+   * Each module is loaded with a dynamic `import()` before the API reference mounts, and its
+   * default export is registered as a plugin (the same shape as the `plugins` entries).
+   *
+   * Unlike `plugins`, this option is JSON-serializable, so integrations that pass their
+   * configuration as JSON — for example the Docker container or Scalar for Aspire — can load
+   * plugins without replacing the whole bundle.
+   *
+   * Note: This is only supported by the standalone browser build (`Scalar.createApiReference`).
+   * When you render the `ApiReference` component yourself, import the plugin and pass it via
+   * `plugins` instead.
+   *
+   * @example ['https://cdn.jsdelivr.net/npm/@example/scalar-plugin/dist/plugin.js']
+   */
+  pluginUrls: z.array(z.string()).optional(),
   /**
    * Allows the user to inject an editor for the spec
    * @default false
    */
   isEditable: z.boolean().optional().default(false).catch(false),
   /**
-   * Controls whether the references show a loading state in the intro
-   * @default false
-   */
-  isLoading: z.boolean().optional().default(false).catch(false),
-  /**
    * Whether to show models in the sidebar, search, and content.
    * @default false
    */
   hideModels: z.boolean().optional().default(false).catch(false),
+  /**
+   * Label for the components.schemas section in the sidebar, content, and search.
+   * Use `Schemas` for OpenAPI terminology; `Models` is the historical default.
+   * @default 'Models'
+   */
+  modelsSectionLabel: z
+    .union([z.literal('Models'), z.literal('Schemas'), z.string()])
+    .optional()
+    .default(DEFAULT_MODELS_SECTION_LABEL)
+    .catch(DEFAULT_MODELS_SECTION_LABEL),
+  /**
+   * API Reference UI localization configuration.
+   *
+   * Use `locale` to select one of the built-in locale packs, `translations` to override UI labels,
+   * and `direction` to control LTR/RTL rendering.
+   */
+  localization: apiReferenceLocalizationSchema,
   /**
    * Sets the file type of the document to download, set to `none` to hide the download button
    * @default 'both'
@@ -107,7 +154,11 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
    * By default hides Unirest, pass `[]` to show all clients
    */
   hiddenClients: z
-    .union([z.record(z.string(), z.union([z.boolean(), z.array(z.string())])), z.array(z.string()), z.literal(true)])
+    .union([
+      z.record(z.string(), z.union([z.boolean(), z.array(z.custom<ClientId<TargetId>>())])),
+      z.array(z.custom<TargetId | ClientId<TargetId> | AvailableClient>()),
+      z.literal(true),
+    ])
     .optional(),
   /** Determine the HTTP client that's selected by default */
   defaultHttpClient: z
@@ -118,13 +169,6 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
     .optional(),
   /** Custom CSS to be added to the page */
   customCss: z.string().optional(),
-  /** onSpecUpdate is fired on spec/swagger content change */
-  onSpecUpdate: z
-    .function({
-      input: [z.string()],
-      output: z.void(),
-    })
-    .optional(),
   /** onServerChange is fired on selected server change */
   onServerChange: z
     .function({
@@ -144,6 +188,23 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
   onLoaded: z.function().optional() as z.ZodType<((slug: string) => Promise<void> | void) | undefined>,
   /** Fired before the outbound request is built; callback receives a mutable request builder (RequestFactory). Experimental API. */
   onBeforeRequest: z
+    .function({
+      input: [
+        z.object({
+          request: z.instanceof(Request),
+          requestBuilder: z.unknown(),
+          envVariables: z.record(z.string(), z.string()),
+        }),
+      ],
+      // Why no output? https://github.com/scalar/scalar/pull/7047
+      // output: z.union([z.void(), z.promise(z.void())]),
+    })
+    .optional() as z.ZodType<
+    | ((a: { request: Request; requestBuilder: any; envVariables: Record<string, string> }) => Promise<void> | void)
+    | undefined
+  >,
+  /** Fired right before the outbound request is sent; callback receives the exact fetch Request that goes over the wire. Experimental API. */
+  onRequestBuilt: z
     .function({
       input: [
         z.object({
@@ -279,6 +340,29 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
     })
     .optional(),
   /**
+   * Customize the browser tab title.
+   *
+   * Called whenever the section in view changes — on sidebar clicks, on scroll, and when switching documents.
+   *
+   * @param input - The section currently in view and the active OpenAPI document
+   * @returns The string to use as the browser tab title
+   * @default undefined
+   */
+  setPageTitle: z
+    .function({
+      input: [
+        z.object({
+          title: z.string(),
+          document: z.object({
+            title: z.string(),
+            slug: z.string(),
+          }),
+        }),
+      ],
+      output: z.string(),
+    })
+    .optional(),
+  /**
    * To handle redirects, pass a function that will receive:
    * - The current path with hash if pathRouting is enabled
    * - The current hash if hashRouting (default)
@@ -317,24 +401,33 @@ export const apiReferenceConfigurationSchema = baseConfigurationSchema.extend({
   /**
    * Whether to expand all tags by default
    *
-   * Warning this can cause performance issues on big documents
+   * Warning: this can cause performance issues on big documents
    * @default false
    */
   defaultOpenAllTags: z.boolean().optional().default(false).catch(false),
   /**
    * Whether to expand all models by default
    *
-   * Warning this can cause performance issues on big documents
+   * Warning: this can cause performance issues on big documents
    * @default false
    */
   expandAllModelSections: z.boolean().optional().default(false).catch(false),
   /**
    * Whether to expand all responses by default
    *
-   * Warning this can cause performance issues on big documents
+   * Warning: this can cause performance issues on big documents
    * @default false
    */
   expandAllResponses: z.boolean().optional().default(false).catch(false),
+  /**
+   * Whether to expand all nested schema properties by default. The
+   * Show/Hide Child Attributes toggle remains available so nested sections can
+   * still be collapsed manually.
+   *
+   * Warning: this can cause performance issues on big documents
+   * @default false
+   */
+  expandAllSchemaProperties: z.boolean().optional().default(false).catch(false),
   /**
    * Function to sort tags
    * @default 'alpha' for alphabetical sorting
@@ -411,6 +504,10 @@ export type ApiReferenceConfiguration = ApiReferenceConfigurationRaw & {
    * Fired before the outbound request is built and sent. Mutate the **request builder** so the eventual fetch call
    * reflects your changes (method, path, headers, body, and related fields).
    *
+   * The `request` passed here is **not** the object sent over the wire; the actual request is rebuilt from the builder
+   * afterwards. Use `onRequestBuilt` instead when you need the exact outgoing request (for example, to hash a
+   * `multipart/form-data` body for request signing).
+   *
    * **Experimental:** The builder matches {@link https://github.com/scalar/scalar/blob/main/packages/workspace-store/src/request-example/builder/request-factory.ts RequestFactory}
    * (`import type { RequestFactory } from '@scalar/workspace-store/request-example'`). That shape is still experimental and may change in minor releases.
    *
@@ -428,6 +525,35 @@ export type ApiReferenceConfiguration = ApiReferenceConfigurationRaw & {
    * ```
    */
   onBeforeRequest?: (input: {
+    request: Request
+    requestBuilder: any
+    envVariables: Record<string, string>
+  }) => void | Promise<void> | undefined
+  /**
+   * Fired after the outbound fetch `Request` has been built, right before it is sent. The `request` is the exact
+   * object handed to fetch: mutating its headers modifies the outgoing request, and hashing its body produces a
+   * hash that matches what the server receives (useful for request signing — a rebuilt `multipart/form-data` body
+   * would get a different boundary).
+   *
+   * Use `onBeforeRequest` instead when you need to mutate the request builder (method, path, query, body,
+   * security); those mutations have no effect at this stage because the request is already built.
+   *
+   * **Experimental:** This API may change in minor releases.
+   *
+   * @param input - Hook argument from the integration layer.
+   * @param input.request - The exact fetch API `Request` that will be sent. Mutate its headers to modify the outgoing request.
+   * @param input.requestBuilder - The builder the request was built from, for inspection. Mutating it has no effect at this stage.
+   * @param input.envVariables - Resolved environment variables for the active environment.
+   * @returns void or a promise that resolves when the hook finishes
+   * @example
+   * ```ts
+   * onRequestBuilt: async ({ request }) => {
+   *   const bodyHash = await hash(await request.clone().arrayBuffer())
+   *   request.headers.set('X-Body-Hash', bodyHash)
+   * }
+   * ```
+   */
+  onRequestBuilt?: (input: {
     request: Request
     requestBuilder: any
     envVariables: Record<string, string>
@@ -480,6 +606,17 @@ export const apiReferenceConfigurationWithSourceSchema: ZodType<
     }
 
     delete configuration.proxy
+  }
+
+  // Migrate fetch to customFetch
+  if (configuration.fetch) {
+    console.warn(`[DEPRECATED] You're using the deprecated 'fetch' attribute. Use 'customFetch' instead.`)
+
+    if (!configuration.customFetch) {
+      configuration.customFetch = configuration.fetch
+    }
+
+    delete configuration.fetch
   }
 
   if (configuration.proxyUrl === OLD_PROXY_URL) {

@@ -1,5 +1,37 @@
 # @scalar/use-hooks
 
+## 0.4.9
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.4.8
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.4.7
+
+### Patch Changes
+
+- [#9540](https://github.com/scalar/scalar/pull/9540): Fix an SSR hydration mismatch in the color-mode toggle: the system preference is now resolved after mount so the first client render matches the server.
+
+## 0.4.6
+
+## 0.4.5
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): chore: remove zod
+
+## 0.4.4
+
+### Patch Changes
+
+- [#8844](https://github.com/scalar/scalar/pull/8844): chore: remove zod
+
 ## 0.4.3
 
 ## 0.4.2

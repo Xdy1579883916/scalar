@@ -1,5 +1,51 @@
 # @scalar/nextjs-openapi
 
+## 0.3.33
+
+## 0.3.32
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.3.31
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.3.30
+
+## 0.3.29
+
+## 0.3.28
+
+## 0.3.27
+
+## 0.3.26
+
+## 0.3.25
+
+## 0.3.24
+
+## 0.3.23
+
+## 0.3.22
+
+## 0.3.21
+
+## 0.3.20
+
+## 0.3.19
+
+## 0.3.18
+
+## 0.3.17
+
+## 0.3.16
+
+## 0.3.15
+
 ## 0.3.14
 
 ## 0.3.13

@@ -25,6 +25,7 @@ const {
   eventBus,
   meta,
   options,
+  documentType,
 } = defineProps<{
   /** The current environment configuration */
   environment: XScalarEnvironment
@@ -46,6 +47,8 @@ const {
   meta: AuthMeta
   /**  Any config options required for the OAuth2 flow */
   options?: OAuth2Options
+  /** Type of the document the schemes belong to, forwarded to the auth tab */
+  documentType?: 'openapi' | 'asyncapi'
 }>()
 
 /** Currently selected authentication scheme based on the active tab index */
@@ -74,6 +77,16 @@ const handleScopesUpdate = (
     ...params,
     meta,
   })
+
+/** Handles scope-definition upserts (add / rename / description change) */
+const handleScopeUpsert = (
+  params: ApiReferenceEvents['auth:upsert:scopes'],
+): void => eventBus.emit('auth:upsert:scopes', params)
+
+/** Handles scope-definition deletes */
+const handleScopeDelete = (
+  params: ApiReferenceEvents['auth:delete:scopes'],
+): void => eventBus.emit('auth:delete:scopes', params)
 
 /** Determines if a tab is currently active */
 const isTabActive = (index: number): boolean => activeAuthIndex === index
@@ -121,6 +134,7 @@ defineExpose({
       :columns="['']"
       presentational>
       <RequestAuthTab
+        :documentType
         :environment
         :eventBus
         :isStatic
@@ -129,7 +143,9 @@ defineExpose({
         :securitySchemes
         :selectedSecuritySchemas="activeScheme.value"
         :server
-        @update:selectedScopes="handleScopesUpdate" />
+        @delete:scope="handleScopeDelete"
+        @update:selectedScopes="handleScopesUpdate"
+        @upsert:scope="handleScopeUpsert" />
     </DataTable>
 
     <!-- Empty State -->

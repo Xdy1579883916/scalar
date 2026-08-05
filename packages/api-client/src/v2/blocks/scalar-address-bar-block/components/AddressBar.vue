@@ -33,28 +33,20 @@ export type AddressBarProps = {
 }
 </script>
 <script setup lang="ts">
-import {
-  ScalarButton,
-  ScalarIcon,
-  ScalarWrappingText,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarIcon } from '@scalar/components/icon'
+import { ScalarWrappingText } from '@scalar/components/wrapping-text'
 import { getSelector } from '@scalar/helpers/dom/get-selector'
 import { REQUEST_METHODS } from '@scalar/helpers/http/http-info'
 import type { HttpMethod as HttpMethodType } from '@scalar/helpers/http/http-methods'
-import { replaceEnvVariables } from '@scalar/helpers/regex/replace-variables'
 import { extractServerFromPath } from '@scalar/helpers/url/extract-server-from-path'
 import { ScalarIconCopy, ScalarIconWarningCircle } from '@scalar/icons'
 import { EditorView } from '@scalar/use-codemirror'
-import { useClipboard } from '@scalar/use-hooks/useClipboard'
 import type {
   ApiReferenceEvents,
   ServerMeta,
   WorkspaceEventBus,
 } from '@scalar/workspace-store/events'
-import {
-  getEnvironmentVariables,
-  getResolvedUrl,
-} from '@scalar/workspace-store/request-example'
 import type { XScalarEnvironment } from '@scalar/workspace-store/schemas/extensions/document/x-scalar-environments'
 import type { ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import {
@@ -106,6 +98,7 @@ const emit = defineEmits<{
 
 const id = useId()
 const sendButtonRef = useTemplateRef('sendButtonRef')
+const mobileSendButtonRef = useTemplateRef('mobileSendButtonRef')
 const addressBarRef = useTemplateRef('addressBarRef')
 
 const { percentage, startLoading, stopLoading, isLoading } =
@@ -155,7 +148,17 @@ watch(uniqueKey, () => {
 // Focus helpers
 // ───────────────────────────────────────────────────────────────────
 
-const handleFocusSendButton = (): void => sendButtonRef.value?.$el?.focus()
+const handleFocusSendButton = (): void => {
+  const desktop = sendButtonRef.value?.$el
+  const mobile = mobileSendButtonRef.value?.$el
+
+  // Focus whichever send button is currently visible
+  if (desktop && desktop.offsetParent !== null) {
+    desktop.focus()
+  } else {
+    mobile?.focus()
+  }
+}
 
 const handleFocusAddressBar = (
   payload: ApiReferenceEvents['ui:focus:address-bar'],
@@ -302,12 +305,29 @@ const handleMethodChange = (newMethod: HttpMethodType): void =>
 /**
  * Save the path on blur and replay the click that caused the blur (so e.g. a
  * click on the Send button still fires after the async update resolves).
- * Tab-outs explicitly do not replay — tabbing to a button should not trigger
- * its click.
+ *
+ * Tab-outs do not replay — tabbing to a button should not trigger its click
+ * (`tabbedOut` is set on `@keydown.tab`).
+ *
+ * Programmatic focus moves also do not replay. On first navigation into a
+ * draft operation, `usePathMasking` focuses and clears the address bar while
+ * `ScalarSidebarNestedItems` focuses the drilled-in Back button in
+ * `nextTick`. That steals focus from CodeMirror, fires blur with a
+ * `relatedTarget` (the Back button), and without a guard we would treat it
+ * like a user click: capture the selector, then `refocusBlurTarget` would
+ * synthesize `.click()` on Back and navigate away.
+ *
+ * `FocusEvent.sourceCapabilities` is null when no input device caused the
+ * focus change (e.g. `element.focus()`). A real pointer click sets it on the
+ * blur that precedes the click, so we still replay Send and other buttons.
  */
 const handlePathBlur = (newPath: string, event: FocusEvent): void => {
   const relatedTarget = event.relatedTarget as Element | null
-  const blurTargetSelector = tabbedOut.value ? null : getSelector(relatedTarget)
+  const blurTargetSelector =
+    tabbedOut.value ||
+    ('sourceCapabilities' in event && event.sourceCapabilities === null)
+      ? null
+      : getSelector(relatedTarget)
   tabbedOut.value = false
 
   emitPathMethodUpdate(
@@ -339,17 +359,9 @@ const handlePathBackspace = (event: KeyboardEvent): void => {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────
-// Clipboard
-// ───────────────────────────────────────────────────────────────────
-
-const { copyToClipboard } = useClipboard()
-
-/** Copy the fully resolved URL (with environment variables applied) */
-const copyUrl = async (): Promise<void> => {
-  const resolvedUrl = getResolvedUrl({ server, path })
-  const variables = getEnvironmentVariables(environment)
-  await copyToClipboard(replaceEnvVariables(resolvedUrl, variables))
+/** Address bar copy is handled in OperationBlock (same URL as Send). */
+const requestCopyUrl = (): void => {
+  eventBus.emit('copy-url:address-bar')
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -380,7 +392,6 @@ onMounted(() => {
   unsubscribes.push(
     eventBus.on('ui:focus:address-bar', handleFocusAddressBar),
     eventBus.on('ui:focus:send-button', handleFocusSendButton),
-    eventBus.on('copy-url:address-bar', copyUrl),
     eventBus.on('hooks:on:request:sent', startLoading),
     eventBus.on('hooks:on:request:complete', stopLoading),
   )
@@ -401,12 +412,23 @@ defineExpose({
 })
 </script>
 <template>
+  <!--
+    Address bar.
+
+    The wide-container layout matches the original single-row bar:
+    `[Method | URL | Copy | History | Send]`. When the surrounding
+    `@container` drops below `@3xl` the bar collapses to
+    `[URL | History]` and a second row appears beneath it with a
+    duplicate `Method`, `Copy`, and `Send` so the URL gets the full
+    container width while every action stays on the same line as the
+    send button.
+  -->
   <div
-    :id="id"
-    class="scalar-address-bar order-last flex h-(--scalar-address-bar-height) w-full [--scalar-address-bar-height:32px] lg:order-0 lg:w-auto">
+    class="order-last flex h-auto w-full max-w-3xl grow-3 flex-wrap items-stretch [--scalar-address-bar-height:32px] @3xl:order-0 @3xl:flex-nowrap">
     <!-- Address Bar -->
     <div
-      class="address-bar-bg-states text-xxs group relative order-last flex w-full max-w-[calc(100dvw-24px)] flex-1 flex-row items-stretch rounded-lg p-0.75 lg:order-none lg:max-w-[580px] lg:min-w-[580px] xl:max-w-[720px] xl:min-w-[720px]"
+      :id="id"
+      class="address-bar-bg-states text-xxs group relative flex h-(--scalar-address-bar-height) w-full flex-1 flex-row items-stretch rounded-lg p-0.75"
       :class="{
         'outline-c-danger outline': hasConflict,
         'rounded-b-none': isDropdownOpen,
@@ -420,7 +442,13 @@ defineExpose({
           class="absolute top-0 left-0 h-full w-full"
           :style />
       </div>
-      <div class="flex gap-1">
+
+      <!--
+        Method, Copy, and Send are hidden in mobile mode (container
+        narrower than `@3xl`) and the duplicate buttons in the trailing
+        mobile actions row take over at that point.
+      -->
+      <div class="hidden @3xl:flex">
         <HttpMethod
           :isEditable="layout !== 'modal'"
           isSquare
@@ -448,13 +476,12 @@ defineExpose({
             (payload) => eventBus.emit('server:update:variables', payload)
           " />
 
-        <div class="fade-left" />
         <!-- Path + URL + env vars -->
         <CodeInput
           ref="addressBarRef"
           alwaysEmitChange
           aria-label="Path"
-          class="min-w-fit pl-px outline-none"
+          class="ml-1 min-w-fit pl-px outline-none"
           disableCloseBrackets
           :disabled="layout === 'modal'"
           disableEnter
@@ -471,15 +498,14 @@ defineExpose({
           @keydown.delete="handlePathBackspace"
           @keydown.tab="tabbedOut = true"
           @submit="handlePathSubmit" />
-        <div class="fade-right" />
       </div>
 
       <!-- Copy url button -->
       <ScalarButton
-        class="hover:bg-b-3 mx-1"
+        class="hover:bg-b-3 mx-1 hidden @3xl:flex"
         size="xs"
         variant="ghost"
-        @click="copyUrl">
+        @click="requestCopyUrl">
         <ScalarIconCopy />
         <span class="sr-only">Copy URL</span>
       </ScalarButton>
@@ -508,6 +534,48 @@ defineExpose({
 
       <ScalarButton
         ref="sendButtonRef"
+        class="relative hidden h-auto shrink-0 overflow-hidden py-1 pr-2.5 pl-2 font-bold @3xl:flex"
+        data-addressbar-action="send"
+        :disabled="isLoading"
+        @click="emit('execute')">
+        <span
+          aria-hidden="true"
+          class="inline-flex items-center gap-1">
+          <ScalarIcon
+            class="relative shrink-0 fill-current"
+            icon="Play"
+            size="xs" />
+          <span class="text-xxs flex">Send</span>
+        </span>
+        <span class="sr-only">
+          Send {{ method }} request to {{ server?.url ?? '' }}{{ path }}
+        </span>
+      </ScalarButton>
+    </div>
+
+    <!--
+      Mobile actions row. Visible by default and hidden once the
+      container reaches `@3xl`, where the duplicate Method / Copy /
+      Send buttons move back into the bar itself.
+    -->
+    <div
+      class="mt-2 flex h-(--scalar-address-bar-height) w-full items-stretch gap-1 @3xl:hidden">
+      <HttpMethod
+        :isEditable="layout !== 'modal'"
+        isSquare
+        :method="methodConflict ?? method"
+        teleport
+        @change="handleMethodChange" />
+      <ScalarButton
+        class="hover:bg-b-3 ml-auto"
+        size="xs"
+        variant="ghost"
+        @click="requestCopyUrl">
+        <ScalarIconCopy />
+        <span class="sr-only">Copy URL</span>
+      </ScalarButton>
+      <ScalarButton
+        ref="mobileSendButtonRef"
         class="relative h-auto shrink-0 overflow-hidden py-1 pr-2.5 pl-2 font-bold"
         data-addressbar-action="send"
         :disabled="isLoading"
@@ -519,7 +587,7 @@ defineExpose({
             class="relative shrink-0 fill-current"
             icon="Play"
             size="xs" />
-          <span class="text-xxs hidden lg:flex">Send</span>
+          <span class="text-xxs">Send</span>
         </span>
         <span class="sr-only">
           Send {{ method }} request to {{ server?.url ?? '' }}{{ path }}
@@ -544,10 +612,17 @@ defineExpose({
   font-size: var(--scalar-small);
 }
 .scroll-timeline-x {
-  scroll-timeline: --scroll-timeline x;
-  /* Firefox supports */
-  scroll-timeline: --scroll-timeline horizontal;
-  -ms-overflow-style: none; /* IE and Edge */
+  -ms-overflow-style: none;
+  /* Fade the URL at the viewport edges. Mask lives on the scrollport (this
+     element) rather than on `.cm-scroller`, whose width follows the URL's
+     full content and pushes the right edge off-screen when overflowing. */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 6px,
+    black calc(100% - 24px),
+    transparent 100%
+  );
 }
 .scroll-timeline-x-hidden {
   overflow-x: auto;
@@ -586,47 +661,7 @@ defineExpose({
   color: var(--scalar-color-3);
   pointer-events: none;
 }
-.fade-left,
-.fade-right {
-  content: '';
-  position: sticky;
-  height: 100%;
-  animation-name: fadein;
-  animation-duration: 1ms;
-  animation-direction: reverse;
-  animation-timeline: --scroll-timeline;
-  pointer-events: none;
-  z-index: 1;
-}
-.fade-left {
-  background: linear-gradient(
-    -90deg,
-    color-mix(in srgb, var(--scalar-address-bar-bg), transparent 100%) 0%,
-    color-mix(in srgb, var(--scalar-address-bar-bg), transparent 20%) 30%,
-    var(--scalar-address-bar-bg) 100%
-  );
-  left: -1px;
-  min-width: 6px;
-  animation-direction: normal;
-}
-.fade-right {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--scalar-address-bar-bg), transparent 100%) 0%,
-    color-mix(in srgb, var(--scalar-address-bar-bg), transparent 20%) 30%,
-    var(--scalar-address-bar-bg) 100%
-  );
-  right: -1px;
-  min-width: 24px;
-}
-@keyframes fadein {
-  0% {
-    opacity: 0;
-  }
-  1% {
-    opacity: 1;
-  }
-}
+
 .address-bar-bg-states {
   --scalar-address-bar-bg: color-mix(
     in srgb,

@@ -12,10 +12,10 @@ This is an internal tool used within the Scalar monorepo. To use it, run command
 pnpm --filter @scalar-internal/build-scripts start <command>
 ```
 
-Or use the shorthand script if available:
+Or use the shorthand script:
 
 ```bash
-pnpm scripts <command>
+pnpm script <command>
 ```
 
 ## Commands
@@ -168,53 +168,13 @@ Scans `documentation/blog/` for markdown files matching `YYYY-MM-DD-slug.md`, th
 pnpm --filter @scalar-internal/build-scripts start generate-blog
 ```
 
-### `release-notes-generator`
-
-Turn a Changesets-style `CHANGELOG.md` section into an AI-written, user-facing release note and append it to the package's `RELEASE_NOTES.json`. The JSON file is the source of truth that the Scalar app bundles and imports directly to power the in-app "What's new" modal - no runtime markdown parsing.
-
-A derived `RELEASE_NOTES.md` is also regenerated from the same JSON when the optional `--markdown` flag is passed, so humans browsing the repo still see a friendly view.
-
-The command runs as part of `pnpm changeset version` in CI (via the root `release:version` script), so the new entry lands in the same "chore: release" pull request as the `CHANGELOG.md` and version bumps and ships inside the published build - no separate publish step, no remote storage to keep in sync.
-
-**What it does:**
-1. Reads the section of a package's `CHANGELOG.md` that was added by `pnpm changeset version`.
-2. Optionally reads the just-released sections of one or more dependency `CHANGELOG.md` files and folds them into the same release note as additional context. Useful when the parent package is a thin shell over a dependency (for example `scalar-app` on top of `@scalar/api-client`).
-3. Pulls the title and description of every PR referenced from those sections so the model has the human-written context, not just the one-line commit subject.
-4. Asks Anthropic Claude to summarise the result in the same Linear-style tone used by `projects/scalar-app/RELEASE_NOTES.json`.
-5. Validates the model output against a Zod schema mirroring the app's `ReleaseNote` type.
-6. Inserts the generated note into `RELEASE_NOTES.json` (creating it if missing). Re-running for the same version replaces the previous entry in place, so the operation is idempotent.
-7. When `--markdown <path>` is provided, regenerates that file from the freshly merged JSON entries so the human-friendly view stays in lock-step with the source of truth.
-
-**Usage:**
-```bash
-ANTHROPIC_API_KEY=sk-ant-... \
-  pnpm --filter @scalar-internal/build-scripts start release-notes-generator \
-    --package scalar-app \
-    --changelog projects/scalar-app/CHANGELOG.md \
-    --output projects/scalar-app/RELEASE_NOTES.json \
-    --markdown projects/scalar-app/RELEASE_NOTES.md \
-    --dependency-changelog packages/api-client/CHANGELOG.md
-```
-
-The version is auto-detected from the `package.json` next to `--changelog`. Pass `--version 1.1.0` explicitly to override it.
-
-`--output` (`-o`) is the path to the source-of-truth `RELEASE_NOTES.json`. The Scalar app imports this file directly, so editing it by hand is supported - the next generator run will preserve every entry except the one matching the released version, which is replaced in place.
-
-`--markdown` (`-m`) is optional. When provided, the command re-emits a derived markdown view at that path from the same merged-and-sorted JSON entries. Edits made to the markdown will be overwritten on the next release.
-
-`--dependency-changelog` (`-d`) accepts any number of paths. Each one must sit next to a `package.json` so the command can read the just-bumped version and pull the matching `## <version>` section. Each dependency uses its own version, since Changesets bumps every package independently inside the same release. Missing files or sections are skipped with a warning rather than failing the run.
-
-Add `--dry-run` to print the generated note without touching the files on disk.
-
-**Authentication:**
-- **Anthropic** - reads `ANTHROPIC_API_KEY` from the environment. When the variable is missing the command prints a warning and exits successfully so contributors and PR builds running `pnpm changeset version` locally without the secret are not blocked.
-- **GitHub** - reads `GITHUB_TOKEN` from the environment to fetch PR titles and descriptions. The repo is public, so an unauthenticated call works too, but the 60 requests / hour / IP rate limit is easy to blow through in CI. Failures (no token, rate limited, network blip) degrade silently to a CHANGELOG-only prompt rather than failing the release pipeline.
-
 ### `generate-readme`
 
-Generate README.md files for packages with readme metadata.
+Generate README.md files for packages with scalarReadme metadata.
 
-This command scans all packages in `packages/` and `integrations/` directories, finds those with `readme` metadata in their `package.json`, and generates standardized README.md files.
+This command scans all packages in `packages/` and `integrations/` directories, finds those with `scalarReadme` metadata in their `package.json`, and generates standardized README.md files.
+
+> The metadata key is intentionally named `scalarReadme` and not `readme`: npm treats a `readme` field in `package.json` as the readme _text_ and publishes it to the registry, which clobbers the real README.md with `[object Object]` on npmjs.com.
 
 **Usage:**
 ```bash
@@ -235,7 +195,7 @@ The generated README includes:
 **Package.json metadata format:**
 ```json
 {
-  "readme": {
+  "scalarReadme": {
     "title": "Package Name",
     "badges": [
       { "type": "npm-version" },

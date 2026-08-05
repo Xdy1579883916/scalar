@@ -1,5 +1,420 @@
 # @scalar/api-reference
 
+## 1.64.0
+
+### Minor Changes
+
+- [#9683](https://github.com/scalar/scalar/pull/9683): Surface the required OAuth scopes for an operation as a dedicated "OAuth scopes" section below the description (above parameters), instead of only inside the "Auth Required" badge popover. Scopes are de-duplicated across security alternatives and shown in both the modern and classic layouts, as well as on AsyncAPI operations.
+- [#9711](https://github.com/scalar/scalar/pull/9711): feat: add `pluginUrls` configuration option to load API Reference plugins from URLs
+
+  Each entry must point to an ESM module that exports a plugin (the same shape as the `plugins` entries) as its default export. The standalone build (`Scalar.createApiReference`) imports the modules before the API reference mounts and registers their default exports alongside the plugins passed directly. Unlike `plugins`, the new option is JSON-serializable, so integrations that pass their configuration as JSON (for example the Docker container or Scalar for Aspire) can load plugins without replacing the whole bundle.
+
+### Patch Changes
+
+- [#9732](https://github.com/scalar/scalar/pull/9732): Render every `oneOf`/`anyOf` group of an `allOf` in place. Previously, when one object composed several mutually-exclusive choices as sibling `oneOf`/`anyOf` under `allOf`, only the first group was shown and the rest were silently dropped. Each choice group now renders its own selector in the position it was declared, and the generated request example stays in sync per group.
+- [#9794](https://github.com/scalar/scalar/pull/9794): Keep sibling `properties` when flattening a single-member `allOf`. Previously, a schema declaring its own `properties` next to an `allOf` holding a single `$ref` lost those sibling properties: the referenced schema's `properties` overwrote them instead of being combined, and the referenced schema's `title`/`description` replaced the parent's. Sibling and inherited properties now render together, `required` lists are unioned, and the parent schema's own annotations win over the base it extends.
+- [#9757](https://github.com/scalar/scalar/pull/9757): fix: read enum metadata from array items
+
+  When an enum is defined inside an array schema's `items`, the enum values were resolved from `items` but their `x-enum-varnames`, `x-enumNames`, and `x-enumDescriptions` were still read from the outer schema, so the metadata was dropped. Both the values and their metadata are now read from the same schema.
+
+- [#9681](https://github.com/scalar/scalar/pull/9681): The "Auth Required" / "Auth Optional" badge on operations now opens on hover, not just on click
+- [#9753](https://github.com/scalar/scalar/pull/9753): fix: badge base styles no longer rely on zero specificity
+
+  The badge base rule was written with `:where(.badge)`, which the scoped-style compiler collapsed to zero specificity, letting any late-loading reset clobber the badge font size, padding, and colors. The base styles now carry real specificity, and consumers that intentionally override them (the download-link json/yaml badges and the webhook badge) keep winning through tailwind-merge and higher-specificity variant rules.
+
+- [#9766](https://github.com/scalar/scalar/pull/9766): fix: give the collapsible section trigger an accessible name and a valid `aria-controls` target
+
+  The trigger button rendered by `CompactSection` carried `aria-controls` set to its own `id`, so it declared that it controls itself, and it exposed no accessible name of its own. Screen reader users heard an unnamed button, and axe-core reported `button-name` and `aria-allowed-attr` on every model section.
+
+  The trigger now points `aria-controls` at the collapsible region, which carries its own id. While the section is collapsed the attribute is dropped entirely rather than left pointing at an element that is not rendered.
+
+  The accessible name now comes from `aria-labelledby` pointing at the heading the trigger already renders, so the name is always the visible text. Referencing the heading rather than copying it into an `aria-label` means the name cannot drift out of sync with what is on screen, which is the WCAG 2.5.3 (Label in Name) failure a duplicated string would risk.
+
+- [#9754](https://github.com/scalar/scalar/pull/9754): fix: adapt the info links to the rendered width of the reference instead of the viewport
+
+  The introduction's info links (contact, license, terms of service, external docs, and `x-scalar-links`), the section header grid, and the classic-layout selector cards switched their layout based on viewport media queries, while the rest of the reference adapts to the rendered width of the reference through the `narrow-references-container` container query. They now restyle based on the container as well, through a new `narrow:` Tailwind variant.
+
+- [#9751](https://github.com/scalar/scalar/pull/9751): fix: keep even heading-to-description spacing on the operation title in narrow layouts
+
+  The narrow (single-column) operation layout bumped the operation title's bottom margin to 24px, so the gap between the heading and its description no longer matched the 12px used on wider screens. The override is removed so the title keeps the shared 12px spacing at every width.
+
+- [#9676](https://github.com/scalar/scalar/pull/9676): Preload additional documents in a multi-document setup while the browser is idle, so switching between them is instant.
+- [#9788](https://github.com/scalar/scalar/pull/9788): Add print styles so printing (or saving to PDF) no longer renders expanded content over the text that follows it. The reference lays itself out as a fixed-viewport application, and its sticky columns were pinned to a screen measurement that is meaningless on paper. Printing now flattens that shell into ordinary document flow: navigation and floating chrome are hidden, sticky positioning and viewport-derived height caps are dropped so long examples are no longer truncated, and small units such as properties and cards avoid breaking across pages.
+- [#9691](https://github.com/scalar/scalar/pull/9691): Show the `format` of primitive array items (e.g. an array of `uuid` strings) in the schema property heading
+
+## 1.63.0
+
+### Minor Changes
+
+- [#9728](https://github.com/scalar/scalar/pull/9728): feat: export `SdkInstallationInstructions` and `getRenderableSdks` from `@scalar/api-reference/blocks`, so consumers that compose their own reference layout can render `x-scalar-sdk-installation` again
+
+## 1.62.9
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 1.62.8
+
+### Patch Changes
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): derive the border radius scale from `--scalar-radius`
+
+  The radius tokens used to be independent, so setting `--scalar-radius: 0` still left rounded corners
+  behind on anything using `--scalar-radius-lg`, `--scalar-radius-xl` or `rounded-full`. They now all
+  derive from `--scalar-radius`, which means overriding that single variable rescales every corner in the
+  interface, and `0` squares it off completely.
+
+  Two new tokens fill out the scale, `--scalar-radius-2xl` (12px) and `--scalar-radius-3xl` (16px), along
+  with `--scalar-radius-full` for pills and circles. The matching `rounded-2xl` and `rounded-3xl` Tailwind
+  utilities now emit CSS; previously they were silently dropped.
+
+  Every default value is unchanged, so nothing shifts unless you were relying on the old behaviour. If
+  your theme sets `--scalar-radius` on its own and expects the larger radii to stay put, set those tokens
+  explicitly. Override `--scalar-radius` on `:root`: a custom property substitutes `var()` at the element
+  where it is declared, so setting the base further down the tree moves it without moving anything derived
+  from it.
+
+## 1.62.7
+
+## 1.62.6
+
+### Patch Changes
+
+- [#9618](https://github.com/scalar/scalar/pull/9618): Render document-wide authentication for AsyncAPI documents. The introduction now shows the same Authentication selector used for OpenAPI, populated from `components.securitySchemes`, with requirements derived from the union of every server's `security` (AsyncAPI has no root-level `security`). When some servers require auth and others accept unauthenticated connections, a no-auth option is offered too. Schemes shared with OpenAPI (`http`, `oauth2`, `openIdConnect`, `apiKey`) get full input UI, and AsyncAPI OAuth2 `availableScopes` are mapped onto OpenAPI `scopes` so the scope list renders. Broker-specific types still appear in the selector but have no dedicated input yet. The selector is now fully interactive for AsyncAPI (selecting schemes, entering credentials, editing scopes) because the auth mutators accept AsyncAPI documents. Operation/channel-level auth is intentionally left for a follow-up.
+- [#9618](https://github.com/scalar/scalar/pull/9618): Name the actual document type in the "security scheme is missing a type" warning. When a scheme has no recognizable type, the auth selector previously always told users to check their "OpenAPI document", even for AsyncAPI documents. The warning now reflects the document it belongs to (e.g. "AsyncAPI") via a new optional `documentType` prop on the auth selector block, defaulting to `openapi`. Schemes that carry a valid but unsupported type (such as AsyncAPI broker types like `userPassword` or `scramSha256`) now show a dedicated "not supported yet" message naming the type, instead of the misleading "missing a type" warning.
+- [#9679](https://github.com/scalar/scalar/pull/9679): Fix the plugin `auth` accessor reading from the wrong store. It now reads from the client store — the same store the reference-side Authentication panel writes credentials into — so plugins see the secrets and selected security schemes the user actually entered instead of an empty state.
+
+## 1.62.5
+
+### Patch Changes
+
+- [#9671](https://github.com/scalar/scalar/pull/9671): Add a `canDeleteSchemes` prop to the auth selector so the delete (trash) affordance can be hidden. It defaults to `true` (unchanged for the API client, where schemes are editable) and the API reference now passes `false`, since its schemes come from the rendered document and cannot be removed there.
+- [#9646](https://github.com/scalar/scalar/pull/9646): Fix deep links to response properties. Response property anchors now carry a `responses` marker so the target operation is found and scrolled to on a fresh load, and response properties are linkable even when `expandAllResponses` is off (a deep link expands the collapsed response and scrolls the property into view).
+- [#9631](https://github.com/scalar/scalar/pull/9631): Hide the protocol and server filters in the classic layout for AsyncAPI documents
+- [#9639](https://github.com/scalar/scalar/pull/9639): Add a read-only accessor for the global authentication state to the plugin API. Plugin lifecycle hooks (`onInit`, `onConfigChange`) now receive an `auth` accessor alongside `config`, and the plugin manager exposes `getAuthState()` for view components. Plugins can read stored secrets and the selected security schemes via `auth.export()`, `auth.getAuthSecrets(documentName, schemeName)`, and `auth.getAuthSelectedSchemas(payload)` without being able to mutate auth.
+- [#9664](https://github.com/scalar/scalar/pull/9664): fix: keep base allOf properties when merging oneOf/anyOf branches
+
+  When a schema used `allOf` to factor out shared object properties next to a `oneOf`/`anyOf`, each branch's own `properties`/`required` overwrote the shared base fields instead of being combined with them. The base fields now stay visible alongside each branch's own fields.
+
+## 1.62.4
+
+## 1.62.3
+
+## 1.62.2
+
+### Patch Changes
+
+- [#9630](https://github.com/scalar/scalar/pull/9630): Render AsyncAPI tags without the extra horizontal indentation on nested channels, and replace the empty "Operations" card in an AsyncAPI tag header with a "Channels" card that lists the channels in the tag.
+- [#9541](https://github.com/scalar/scalar/pull/9541): Fix an SSR hydration mismatch on the root element: the obtrusive-scrollbar class is now resolved after mount so the first client render matches the server.
+
+## 1.62.1
+
+### Patch Changes
+
+- [#9575](https://github.com/scalar/scalar/pull/9575): Render the discriminator variant dropdown for object schemas that only declare a `discriminator.mapping` (no explicit `oneOf`/`anyOf`), which is the shape NSwag emits for polymorphic types
+- [#9483](https://github.com/scalar/scalar/pull/9483): Render JSON Schema 2020-12 `$dynamicRef` in schemas, so generic patterns like `PaginatedResponse<T>` show their concrete bound item type (for example `User[]`) instead of an empty shape. The reference threads the active dynamic scope through the schema tree and binds each `$dynamicRef` to the matching `$dynamicAnchor`.
+- [#9587](https://github.com/scalar/scalar/pull/9587): Fix `Maximum call stack size exceeded` crash when rendering a schema whose self-reference is reached through an `allOf` branch
+
+## 1.62.0
+
+### Minor Changes
+
+- [#9597](https://github.com/scalar/scalar/pull/9597): Add API Reference UI localization configuration with built-in English, Russian, Spanish, French, German, Simplified Chinese and Arabic translations, including automatic RTL direction for Arabic locales.
+
+  Update the shared theme reset so text inputs align to the logical start by default for RTL documents.
+
+  Add a `mergeObjects` deep-merge helper to `@scalar/helpers`, used by the localization layer to merge translation overrides onto the built-in locale.
+
+- [#9568](https://github.com/scalar/scalar/pull/9568): Add AsyncAPI protocol and server pickers to the sidebar (like the multi-document picker) that filter the navigation down to the operations reachable over the selected protocol/server
+- [#9543](https://github.com/scalar/scalar/pull/9543): Add the `x-scalar-links` OpenAPI extension to render extra named links (like a privacy policy or imprint) next to the contact, license and terms of service links in the introduction.
+
+### Patch Changes
+
+- [#9545](https://github.com/scalar/scalar/pull/9545): Render the divider between the contact email and url links in the introduction, so they are separated like the other info links.
+- [#8519](https://github.com/scalar/scalar/pull/8519): refactor: extract the code example block into `@scalar/blocks/code-example`. `api-client`, `api-client-react`, and `api-reference` now import `CodeExample`, `findClient`, `generateClientOptions`, and the related helpers from the new package. `workspace-store` exports `isParamDisabled` with an optional `defaultDisabled` argument.
+
+  **Breaking (`@scalar/api-client`):** the `@scalar/api-client/blocks/operation-code-sample` and `@scalar/api-client/v2/blocks/operation-code-sample` export paths have been removed. Import from `@scalar/blocks/code-example` instead, and use the renamed `CodeExample` / `CodeExampleProps` (previously `OperationCodeSample` / `OperationCodeSampleProps`).
+
+- [#9578](https://github.com/scalar/scalar/pull/9578): Show the `propertyNames` type and format (e.g. `string · uuid`) for a map of additional properties, so key constraints are no longer dropped from the rendered schema
+- [#9548](https://github.com/scalar/scalar/pull/9548): Keep request and response example pickers in sync across operations. Selecting an example (e.g. "Use case 1") now selects the example with the same key on every other operation that defines it, mirroring how the programming-language selection already syncs. Operations that do not have a matching example keep their current selection.
+
+## 1.61.0
+
+### Minor Changes
+
+- [#9520](https://github.com/scalar/scalar/pull/9520): Render AsyncAPI operations and their messages (with payload and header schemas) nested inside each channel, in both the modern and classic layouts
+- [#9569](https://github.com/scalar/scalar/pull/9569): Show server and protocol labels when rendering AsyncAPI channels and messages: each channel header lists the servers it's available on and their protocols, and each message surfaces every protocol it's carried over (its channel's server protocols unioned with its own binding protocols)
+- [#9515](https://github.com/scalar/scalar/pull/9515): feat: add `requestBuilt` client plugin hook and `onRequestBuilt` configuration callback that receive the exact fetch `Request` that is sent over the wire
+
+  The hook runs after the request has been built, right before it is sent. Header mutations apply to the outgoing request and the body bytes match what the server receives, which makes request signing possible: hashing the body of a rebuilt `multipart/form-data` request would produce a different multipart boundary than the request that is actually sent.
+
+### Patch Changes
+
+- [#9559](https://github.com/scalar/scalar/pull/9559): Render an object's own properties when they are factored out alongside a composition keyword (`anyOf`/`oneOf`/`allOf`/`not`)
+- [#9542](https://github.com/scalar/scalar/pull/9542): Fix an SSR hydration mismatch in the injected `<style>` tag: the CSS is now rendered verbatim instead of being HTML-escaped on the server (`"` became `&quot;`), which broke font styles and caused a hydration mismatch.
+- [#9546](https://github.com/scalar/scalar/pull/9546): fix: let a later `allOf` member override the `description` and `title` of an earlier one
+- [#9557](https://github.com/scalar/scalar/pull/9557): Fix `oneOf`/`anyOf` being dropped when nested inside an `allOf`. The composition is now preserved so its variants keep rendering alongside the merged base properties, instead of only the first `allOf` member showing up.
+
+## 1.60.0
+
+### Minor Changes
+
+- [#9478](https://github.com/scalar/scalar/pull/9478): Add `content.start` plugin view slot and `sidebar` visibility option for plugin view components.
+  - **`content.start`**: A new view slot that renders custom plugin components **before** the Introduction/Info section (at the top of the content area).
+  - **`sidebar` option on `ViewComponent`**: Plugins can now opt-in to display a sidebar entry for their custom views by providing `sidebar: { show: true, label: 'My Page' }`. Omitting `sidebar` or setting `show: false` hides the entry from the sidebar. The entry hooks into the existing navigation, so clicking it scrolls to the plugin view and it highlights as it scrolls into view.
+
+### Patch Changes
+
+- [#9504](https://github.com/scalar/scalar/pull/9504): Fix extra nesting and duplicated description when array items are wrapped in a single-item composition (`allOf`, `oneOf`, or `anyOf`)
+- [#9526](https://github.com/scalar/scalar/pull/9526): Fix anchor links to schema properties that are hidden inside collapsed sections. Deep links now expand the disclosures on the path to the target property and scroll to it, so links work without enabling `expandAllSchemaProperties`.
+- [#9484](https://github.com/scalar/scalar/pull/9484): Fix the schema description being hidden for responses when `expandAllResponses` is enabled. A response's own description and its content schema's description are now both shown.
+- [#9531](https://github.com/scalar/scalar/pull/9531): fix: the introduction loading skeleton now mirrors the actual layout (badges, title, links, description and selector cards) instead of generic stacked bars, so the page no longer jumps once the document loads
+- [#9524](https://github.com/scalar/scalar/pull/9524): Fix sidebar overlapping the content at exactly 1000px wide. The layout grid switched to the mobile (stacked) layout at `max-width: 1000px` while the sidebar visibility is driven by Tailwind's `lg:` variant (`min-width: 1000px`), so both fired at 1000px. The mobile breakpoint now uses `width < 1000px`, the exact complement of `lg:`, so 1000px is treated as desktop.
+
+## 1.59.3
+
+### Patch Changes
+
+- [#9396](https://github.com/scalar/scalar/pull/9396): Refactor URL redirects into a routing-agnostic, list-driven engine. Redirects now operate on the bare navigation id, so each rule works across hash, hash-base-path, and path routing automatically. Also redirect old `models/<name>` bookmarks to the configured models section slug when the section label is customized (e.g. `schemas/`).
+- [#9489](https://github.com/scalar/scalar/pull/9489): Do not render the info link list when no links are available.
+- [#9342](https://github.com/scalar/scalar/pull/9342): fix: resolve operations when OpenAPI path items use `$ref`
+
+  Path entries and webhooks can reference `components.pathItems` instead of inlining operations. Navigation, mutators, search, and markdown export now resolve path-item references before reading HTTP methods and path-level parameters.
+
+- [#9498](https://github.com/scalar/scalar/pull/9498): Sync the SDK installation tabs with the operation code examples: picking a language under "Client Libraries" now switches every operation's code sample to that language's custom example
+
+## 1.59.2
+
+### Patch Changes
+
+- [#9471](https://github.com/scalar/scalar/pull/9471): Restore support for the deprecated `source` install command on `x-scalar-sdk-installation`. When set, it is appended to `description` as a fenced code block (or used on its own when there is no `description`). `description` remains the promoted field.
+
+## 1.59.1
+
+### Patch Changes
+
+- [#9462](https://github.com/scalar/scalar/pull/9462): fix(api-reference): align examples panel and disable sticky when narrow
+
+## 1.59.0
+
+### Minor Changes
+
+- [#9435](https://github.com/scalar/scalar/pull/9435): feat(api-reference): render AsyncAPI channel parameters
+
+  Channel address parameters (the `{param}` placeholders in a channel address) are now shown in the API reference, reusing the same parameter list component as OpenAPI operations. Their `enum`, `default`, and `examples` are displayed on a string schema.
+
+- [#9438](https://github.com/scalar/scalar/pull/9438): feat(api-reference): add an AsyncAPI server selector
+
+  Adds a server selector for AsyncAPI documents in the API reference introduction. It mirrors the OpenAPI server selector but works with the AsyncAPI server shape (a named map of `host`/`protocol`/`pathname`), labelling each server with its constructed connection URL.
+
+  Server selection and variable changes are now persisted to the workspace store via new `asyncapi-server:update:selected` and `asyncapi-server:update:variables` events and their mutators, mirroring the OpenAPI wiring.
+
+- [#9422](https://github.com/scalar/scalar/pull/9422): Add a `nonce` option for Content Security Policy support.
+
+  When you pass a `nonce`, the rendered HTML stamps it onto the inline `<script>` and the CDN `<script>` tag (and Scalar's own `<style>` tags, plus a matching `<meta property="csp-nonce">`). This lets the API Reference run under a strict `script-src` with no `unsafe-inline` and no `unsafe-eval`.
+
+  ```ts
+  ApiReference({
+    url: '/openapi.json',
+    // Match this value in your `script-src` CSP directive.
+    nonce: 'r4nd0m',
+  })
+  ```
+
+  Note: `style-src` still needs `'unsafe-inline'`. The reference renders inline `style="…"` attributes, which a CSP nonce can never authorize (nonces only apply to `<script>`, `<style>` and `<link>` elements), so a nonce-only `style-src` is not possible. The win is a fully strict `script-src`.
+
+- [#9400](https://github.com/scalar/scalar/pull/9400): feat(api-reference): add `expandAllSchemaProperties` config option.
+
+  When enabled, nested schema properties are expanded by default while keeping the
+  "Show/Hide Child Attributes" button available for manual collapsing. Expansion
+  is cycle-safe: every finite branch is expanded fully, and self-referential
+  ($ref or inline) schemas stop at the point they would otherwise recurse forever.
+
+- [#9399](https://github.com/scalar/scalar/pull/9399): Show custom SDK installation instructions from `x-scalar-sdk-installation` in the introduction card, falling back to the client selector when there are none. Each entry takes a `lang` and a Markdown `description`, so a single tab can render rich instructions with syntax-highlighted code blocks (for example Maven and Gradle for Java)
+
+### Patch Changes
+
+- [#9388](https://github.com/scalar/scalar/pull/9388): Add `ScalarVirtualCodeBlock` component with copy button support for virtualized code blocks
+- [#9436](https://github.com/scalar/scalar/pull/9436): Hide the client selector for AsyncAPI documents
+- [#9398](https://github.com/scalar/scalar/pull/9398): feat: read code samples from x-readme, x-stainless and x-scalar extensions
+
+  In addition to `x-codeSamples`, the code sample picker now reads custom samples from `x-scalar-examples`, `x-stainless-snippets`, `x-stainless-examples`, and `x-readme.code-samples`. When more than one is present on an operation, the highest-priority source is used (x-scalar-examples > x-stainless-snippets > x-stainless-examples > x-readme > x-codeSamples).
+
+- [#9426](https://github.com/scalar/scalar/pull/9426): feat(api-reference): render the contact URL from `info.contact.url`
+- [#8573](https://github.com/scalar/scalar/pull/8573): fix(api-reference): infer discriminator variants from mapping
+- [#9131](https://github.com/scalar/scalar/pull/9131): fix(api-reference): preserve OAuth redirect URI when switching OpenAPI documents
+
+  When using multiple OpenAPI documents with OAuth configured via `oauth2RedirectUri`,
+  switching to another document no longer clears the Redirect URL in the Authentication
+  section.
+
+  The fix threads `oauth2RedirectUri` from the top-level configuration into the security
+  scheme merge chain so that each newly loaded document's OAuth flows are pre-populated
+  with the configured redirect URI, rather than relying solely on a component-level watcher
+  that would skip re-population when the same OAuth flow identity was detected across
+  documents.
+
+- [#9391](https://github.com/scalar/scalar/pull/9391): fix: stabilize the tab title at the top of the document
+
+  The document-start sentinel and the Introduction section both fire an intersection event at scroll-top. They resolved to different entries, so the tab title raced between the section title and the document title. The sentinel now emits the Introduction entry, so both agree.
+
+- [#9370](https://github.com/scalar/scalar/pull/9370): fix(api-reference): rework the modern operation layout with CSS grid so the request example sits directly under the description on narrow screens, and move the operation title and auth badge into the same grid
+- [#9421](https://github.com/scalar/scalar/pull/9421): fix(api-reference): avoid SSR hydration mismatch from the search shortcut and teleport ids
+
+  The macOS search shortcut symbol was derived from `navigator` during render, so a Mac client hydrated `⌘` where the server sent `⌃`. The platform is now resolved after mount. Teleport target ids and the search modal ids also switched from `nanoid()` to Vue's SSR-stable `useId()`.
+
+- [#9392](https://github.com/scalar/scalar/pull/9392): Clean up the standalone build's injected `<head>` styles on `destroy()` so they no longer linger after SPA-style navigation (Turbo Drive, htmx). The styles are re-attached when a new instance mounts.
+- [#9420](https://github.com/scalar/scalar/pull/9420): fix(api-reference): make x-tagGroups titles navigable from search
+
+  Tag group titles appeared as search results but clicking them did nothing,
+  because the flattened modern layout rendered no element carrying the tag
+  group id to scroll to. The group now exposes its id as a scroll anchor.
+
+## 1.58.0
+
+### Minor Changes
+
+- [#9372](https://github.com/scalar/scalar/pull/9372): Render AsyncAPI `components.schemas` as Models, listed in the sidebar and content just like OpenAPI schemas
+- [#7618](https://github.com/scalar/scalar/pull/7618): feat(api-reference): add `setPageTitle` to customize the browser tab title
+
+  Pass a `setPageTitle` function to control the browser tab title. It is called whenever the section in view changes — on sidebar clicks, on scroll, and when switching documents — and receives the section title and the active OpenAPI document:
+
+  ```js
+  setPageTitle: ({ title, document }) => `${document.title} – ${title}`
+  ```
+
+### Patch Changes
+
+- [#9348](https://github.com/scalar/scalar/pull/9348): Render AsyncAPI channels as sections in the content area, with the channel address as the heading and the channel description below. Channels are grouped under tags when the navigation tree groups them. Operations and messages are not rendered yet.
+- [#9255](https://github.com/scalar/scalar/pull/9255): Surface the Introduction entry and any headings extracted from `info.description` of AsyncAPI documents in the sidebar, mirroring how OpenAPI documents are handled.
+- [#9347](https://github.com/scalar/scalar/pull/9347): Surface AsyncAPI `info.description` headings in the search modal, mirroring the sidebar behaviour. AsyncAPI channels, operations, and messages are not indexed yet.
+- [#9350](https://github.com/scalar/scalar/pull/9350): feat(api-reference): list Ask AI and MCP Servers as Scalar Docs features in the Deploy popover
+- [#9310](https://github.com/scalar/scalar/pull/9310): Add an ESM standalone build (`dist/browser/standalone.esm.js`) alongside the existing UMD bundle. The new bundle works as a side-effect script (registers `window.Scalar.createApiReference` and reads `data-*` configuration) and exports `createApiReference` for direct ESM consumers. It is fully minified through Rolldown's native minifier and uses code splitting so heavy features load asynchronously after first paint:
+  - The API client modal (request editor, response viewer, CodeMirror) is now `await import`'d inside `onMounted` instead of statically imported, moving ~265 KB into a `chunks/modal-*.js` chunk that loads in the background.
+  - The Agent Scalar chat interface (already wrapped in `defineAsyncComponent`) becomes a real `chunks/AgentScalarChatInterface-*.js` chunk (~200 KB), loaded only when the agent is enabled.
+  - The 84 per-icon dynamic imports from `@scalar/icons/library` are coalesced into a single `chunks/icons-*.js`.
+
+  Net effect: initial sync load drops from ~3.32 MB (UMD) to ~2.73 MB (ESM) — a ~570 KB improvement — while total bundle size shrinks by ~140 KB.
+
+  Also adds an `@scalar/api-client/modal/map-hidden-clients-config` deep export so consumers that only need the lightweight client-list helper don't pull the full modal barrel into their static graph.
+
+- [#9139](https://github.com/scalar/scalar/pull/9139): fix(api-reference): preserve OAuth redirect URL when switching between OpenAPI documents
+
+  Auth changes were being persisted under the wrong document slug and shared a single debounce queue across all documents. When switching documents quickly, the pending save for the first document could be overwritten or dropped by a save for the second document, causing the redirect URL (and other auth secrets) to appear cleared after switching back.
+
+  The fix uses `event.documentName` as both the debounce key and the storage key, giving each document its own independent debounce queue.
+
+- [#9194](https://github.com/scalar/scalar/pull/9194): fix(api-reference): break cycles in `mergeAllOfSchemas` for self-referencing schemas (whether they `$ref` back to themselves through array items or through a plain object property), which previously crashed the docs preview with "too much recursion"
+- [#9309](https://github.com/scalar/scalar/pull/9309): feat: add `modelsSectionLabel` configuration (`'Models' | 'Schemas' | string`) to use OpenAPI-style Schemas terminology in the sidebar, content, and search.
+
+## 1.57.5
+
+### Patch Changes
+
+- [#9318](https://github.com/scalar/scalar/pull/9318): fix: restore response content type selector when expandAllResponses is enabled
+
+  Move the content type picker after the disclosure panel so it stacks above expanded response content and remains clickable when `expandAllResponses` is true.
+
+## 1.57.4
+
+## 1.57.3
+
+### Patch Changes
+
+- [#9169](https://github.com/scalar/scalar/pull/9169): feat: add `customFetch` to the api-reference configuration and forward it to the API client so requests (including "Test Request" calls) use the custom fetch — enabling things like `credentials: 'include'`. The previous `fetch` option is deprecated and migrated automatically with a console warning.
+- [#9273](https://github.com/scalar/scalar/pull/9273): fix: render `null`, whitespace-only, and `value`/`externalValue`-shaped schema examples correctly
+
+## 1.57.2
+
+### Patch Changes
+
+- [#9234](https://github.com/scalar/scalar/pull/9234): fix(api-reference): prevent security badge from shrinking
+
+## 1.57.1
+
+## 1.57.0
+
+### Minor Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-reference): clean up deprecated document listeners on destroy
+
+  `createApiReference()` registered three document-level listeners
+  (`scalar:reload-references`, `scalar:destroy-references`,
+  `scalar:update-references-config`) but `destroy()` only unmounted the
+  Vue app — the listeners stayed attached forever. In environments that
+  mount and destroy instances repeatedly (notably the Astro integration's
+  `renderMode="client"` with view transitions), each navigation leaked
+  three permanent listeners on `document`.
+
+  Tie the listeners to an `AbortController` and abort it from `destroy()`
+  so they all come off in one shot.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: show "Download AsyncAPI Document" label for AsyncAPI documents
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: rename the "OAS" version badge to "OpenAPI" and show an "AsyncAPI" badge for AsyncAPI documents
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-reference): improve search ranking for parameter, request-body, and model field names, including polymorphic (oneOf/anyOf/allOf) schemas
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: resolve $ref in additionalProperties before rendering schema
+- [#9211](https://github.com/scalar/scalar/pull/9211): chore: use the new schemas
+- [#9211](https://github.com/scalar/scalar/pull/9211): Fix mobile sidebar z-index to ensure it appears above all content when open
+- [#9211](https://github.com/scalar/scalar/pull/9211): Avoid repeating request body schema descriptions above collapsed overflow properties.
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: add more analytics events
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: agent scalar warnings
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(api-reference): lower badge style specificity
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix: posthog stream warning
+
+## 1.56.0
+
+### Minor Changes
+
+- [#9018](https://github.com/scalar/scalar/pull/9018): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#9164](https://github.com/scalar/scalar/pull/9164): fix(api-reference): clean up deprecated document listeners on destroy
+
+  `createApiReference()` registered three document-level listeners
+  (`scalar:reload-references`, `scalar:destroy-references`,
+  `scalar:update-references-config`) but `destroy()` only unmounted the
+  Vue app — the listeners stayed attached forever. In environments that
+  mount and destroy instances repeatedly (notably the Astro integration's
+  `renderMode="client"` with view transitions), each navigation leaked
+  three permanent listeners on `document`.
+
+  Tie the listeners to an `AbortController` and abort it from `destroy()`
+  so they all come off in one shot.
+
+- [#9158](https://github.com/scalar/scalar/pull/9158): fix: show "Download AsyncAPI Document" label for AsyncAPI documents
+- [#9159](https://github.com/scalar/scalar/pull/9159): fix: rename the "OAS" version badge to "OpenAPI" and show an "AsyncAPI" badge for AsyncAPI documents
+- [#9184](https://github.com/scalar/scalar/pull/9184): fix(api-client): block invalid request URLs before send and surface `buildRequest` failures as results
+
+  Request construction now treats a bad merged URL as a first-class failure instead of throwing deep inside helpers. After `mergeUrls`, `resolveRequestFactoryUrl` rejects incomplete targets when strict mode applies: relative URLs, an empty server base, or path strings that still contain unresolved `{{variable}}` placeholders. Callers may set `allowMissingRequestServerBase` where a full absolute URL is intentionally optional (for example the embedded modal layout in `OperationBlock`, or API Reference `onBeforeRequest` hooks that build against the document origin).
+
+  `buildRequest` returns a `Result` (`ok` / `err`) with stable error codes such as `MISSING_REQUEST_SERVER_BASE`, `INVALID_REQUEST_FACTORY_URL`, and `BUILD_REQUEST_FAILED` for unexpected synchronous failures. Those failures are wrapped with `safeRun` from `@scalar/helpers`, which logs to `console.error` and maps throws to a string message on the result. The API Reference plugin path logs and skips `onBeforeRequest` when a preview request cannot be built, so user hooks never run against a half-built fetch payload.
+
+  Downstream packages (`api-client`, `api-reference`, `scalar-app` where applicable) unwrap the result, show toasts or logs, and avoid calling `sendRequest` until the URL is valid.
+
+- [#9144](https://github.com/scalar/scalar/pull/9144): fix(api-reference): improve search ranking for parameter, request-body, and model field names, including polymorphic (oneOf/anyOf/allOf) schemas
+- [#9192](https://github.com/scalar/scalar/pull/9192): fix: resolve $ref in additionalProperties before rendering schema
+- [#8844](https://github.com/scalar/scalar/pull/8844): chore: use the new schemas
+- [#9170](https://github.com/scalar/scalar/pull/9170): Fix mobile sidebar z-index to ensure it appears above all content when open
+- [#9136](https://github.com/scalar/scalar/pull/9136): Avoid repeating request body schema descriptions above collapsed overflow properties.
+- [#9125](https://github.com/scalar/scalar/pull/9125): feat: add more analytics events
+- [#9120](https://github.com/scalar/scalar/pull/9120): fix: agent scalar warnings
+- [#9111](https://github.com/scalar/scalar/pull/9111): fix(api-reference): lower badge style specificity
+- [#9124](https://github.com/scalar/scalar/pull/9124): fix: posthog stream warning
+
 ## 1.55.3
 
 ### Patch Changes

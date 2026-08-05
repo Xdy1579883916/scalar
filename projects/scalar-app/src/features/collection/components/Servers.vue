@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import { ServerVariablesForm } from '@scalar/api-client/components/Server'
 import { DeleteSidebarListElement } from '@scalar/api-client/components/Sidebar'
-import {
-  ScalarButton,
-  ScalarMarkdown,
-  ScalarModal,
-  ScalarToggle,
-  useModal,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarMarkdown } from '@scalar/components/markdown'
+import { ScalarModal, useModal } from '@scalar/components/modal'
+import { ScalarToggle } from '@scalar/components/toggle'
 import { debounce } from '@scalar/helpers/general/debounce'
 import { isHttpMethod } from '@scalar/helpers/http/is-http-method'
 import { ScalarIconPlus, ScalarIconTrash } from '@scalar/icons'
 import type { ServerMeta } from '@scalar/workspace-store/events'
+import { getPathItemOperation } from '@scalar/workspace-store/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import type { ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed, ref, watchEffect } from 'vue'
@@ -38,7 +36,7 @@ const operation = computed(() => {
     return null
   }
   // Operation found, return the servers
-  return getResolvedRef(document?.paths?.[path]?.[method])
+  return getResolvedRef(getPathItemOperation(document?.paths?.[path], method))
 })
 
 const useOperationServers = ref(false)

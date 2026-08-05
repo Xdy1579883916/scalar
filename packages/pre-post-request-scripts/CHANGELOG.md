@@ -1,5 +1,100 @@
 # @scalar/scripts
 
+## 0.4.35
+
+## 0.4.34
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.4.33
+
+## 0.4.32
+
+## 0.4.31
+
+## 0.4.30
+
+## 0.4.29
+
+## 0.4.28
+
+## 0.4.27
+
+## 0.4.26
+
+## 0.4.25
+
+## 0.4.24
+
+## 0.4.23
+
+## 0.4.22
+
+## 0.4.21
+
+## 0.4.20
+
+## 0.4.19
+
+### Patch Changes
+
+- [#9338](https://github.com/scalar/scalar/pull/9338): perf: warm up the request scripts sandbox on mount when scripts are present, so the first request no longer pays the sandbox cold-start cost
+
+## 0.4.18
+
+### Patch Changes
+
+- [#9332](https://github.com/scalar/scalar/pull/9332): fix: running scripts on electron
+
+## 0.4.17
+
+## 0.4.16
+
+### Patch Changes
+
+- [#9291](https://github.com/scalar/scalar/pull/9291): chore: import from `@scalar/components` subpaths instead of the package barrel for better tree-shaking
+- [#9260](https://github.com/scalar/scalar/pull/9260): chore: remove `'unsafe-eval'` from the desktop/web app CSP
+
+  Pre-request and post-response scripts run through `postman-sandbox`, which relies on `eval`. Instead of allowing `'unsafe-eval'` in the main application CSP, script execution now happens inside an isolated sandbox iframe (`sandbox.html`) that is loaded from a real same-origin URL and carries its own permissive CSP. The host talks to it over `postMessage`, so the main `script-src` no longer needs `'unsafe-eval'`.
+
+## 0.4.15
+
+## 0.4.14
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: optimize layout for mobile
+  - Hide the document breadcrumb on small screens and surface workspace
+    switching from the menu instead, so the top bar stays uncluttered.
+  - Convert the document save / discard / pull / push / publish buttons to
+    header-button styling and only render the trailing divider when there
+    are actual cluster buttons next to it.
+  - Stack the address bar onto two rows on small screens so the URL and
+    the action cluster (copy / history / send) each get a full row.
+  - Hide the "Log in" affordance from the small-screen top bar (the menu
+    still owns it) and keep only the primary "Register" CTA there.
+  - Give the pre-request and post-response script editors proper vertical
+    padding so the help text no longer clips when it wraps.
+
+## 0.4.13
+
+### Patch Changes
+
+- [#9135](https://github.com/scalar/scalar/pull/9135): feat: optimize layout for mobile
+  - Hide the document breadcrumb on small screens and surface workspace
+    switching from the menu instead, so the top bar stays uncluttered.
+  - Convert the document save / discard / pull / push / publish buttons to
+    header-button styling and only render the trailing divider when there
+    are actual cluster buttons next to it.
+  - Stack the address bar onto two rows on small screens so the URL and
+    the action cluster (copy / history / send) each get a full row.
+  - Hide the "Log in" affordance from the small-screen top bar (the menu
+    still owns it) and keep only the primary "Register" CTA there.
+  - Give the pre-request and post-response script editors proper vertical
+    padding so the help text no longer clips when it wraps.
+
 ## 0.4.12
 
 ## 0.4.11

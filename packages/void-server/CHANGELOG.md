@@ -1,5 +1,35 @@
 # @scalar/void-server
 
+## 2.5.4
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 2.5.3
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 2.5.2
+
+### Patch Changes
+
+- [#9608](https://github.com/scalar/scalar/pull/9608): Add logger options to `createVoidServer`.
+
+## 2.5.1
+
+## 2.5.0
+
+### Minor Changes
+
+- [#9346](https://github.com/scalar/scalar/pull/9346): feat: add WebSocket echo endpoint with connection timeout
+
+## 2.4.13
+
+## 2.4.12
+
 ## 2.4.11
 
 ## 2.4.10

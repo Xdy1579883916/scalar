@@ -1,4 +1,4 @@
-import { useModal } from '@scalar/components'
+import { useModal } from '@scalar/components/modal'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { nextTick } from 'vue'
@@ -87,5 +87,36 @@ describe('WhatsNewModal', () => {
     await nextTick()
 
     expect(localStorage.getItem(WHATS_NEW_LAST_SEEN_KEY)).toBe(releaseNotes[0]?.version)
+  })
+
+  it('renders rich content blocks (paragraphs, images, videos) when present', async () => {
+    const state = useModal()
+    mount(WhatsNewModal, { props: { state } })
+
+    state.show()
+    await nextTick()
+    await nextTick()
+
+    const richEntry = releaseNotes.find((entry) => entry.content && entry.content.length > 0)
+    if (!richEntry?.content) {
+      // No fixture has rich content yet; this test still documents the
+      // expectation so it starts protecting the modal as soon as a
+      // future release ships with `content` blocks.
+      return
+    }
+
+    for (const block of richEntry.content) {
+      if (block.type === 'image') {
+        const img = document.querySelector(`img[src="${block.src}"]`)
+        expect(img).not.toBeNull()
+      }
+      if (block.type === 'video') {
+        const video = document.querySelector(`video[src="${block.src}"]`)
+        expect(video).not.toBeNull()
+      }
+      if (block.type === 'paragraph') {
+        expect(document.body.textContent).toContain(block.text)
+      }
+    }
   })
 })

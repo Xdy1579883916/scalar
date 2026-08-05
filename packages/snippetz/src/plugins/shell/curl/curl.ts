@@ -1,6 +1,20 @@
+import { parseMimeType } from '@scalar/helpers/http/mime-type'
 import type { Plugin } from '@scalar/types/snippetz'
 
 import { escapeSingleQuotes } from '@/libs/shell'
+
+/**
+ * True for `application/json`, any RFC 6839 `+json` structured-syntax suffix
+ * (e.g. `application/vnd.api+json`), and parameterized variants
+ * (e.g. `application/json;charset=utf-8`). Case-insensitive.
+ */
+const isJsonContentType = (value: string | undefined): boolean => {
+  if (!value) {
+    return false
+  }
+  const { subtype } = parseMimeType(value)
+  return subtype === 'json' || subtype.endsWith('+json')
+}
 
 /**
  * shell/curl
@@ -22,9 +36,11 @@ export const shellCurl: Plugin = {
     // Build curl command parts
     const parts: string[] = ['curl']
 
-    // URL (quote if has query parameters or special characters)
+    // Build the URL, joining extra query parameters with `&` when the URL already carries a query string
+    const baseUrl = normalizedRequest.url ?? ''
+    const separator = baseUrl.includes('?') ? '&' : '?'
     const queryString = normalizedRequest.queryString?.length
-      ? '?' +
+      ? separator +
         normalizedRequest.queryString
           .map((param) => {
             // Ensure both name and value are fully URI encoded
@@ -32,9 +48,10 @@ export const shellCurl: Plugin = {
           })
           .join('&')
       : ''
-    const url = `${normalizedRequest.url}${queryString}`
-    const hasSpecialChars = /[\s<>[\]{}|\\^%$]/.test(url)
-    const urlPart = queryString || hasSpecialChars ? `'${url}'` : url
+    const url = `${baseUrl}${queryString}`
+    // Quote the URL whenever it contains anything the shell could interpret (spaces, query separators, globs, …)
+    const isShellSafe = /^[A-Za-z0-9._~:/%@+,=-]*$/.test(url)
+    const urlPart = isShellSafe ? url : `'${escapeSingleQuotes(url)}'`
     parts[0] = `curl ${urlPart}`
 
     // Method
@@ -78,7 +95,7 @@ export const shellCurl: Plugin = {
 
     // Body
     if (normalizedRequest.postData) {
-      if (normalizedRequest.postData.mimeType === 'application/json') {
+      if (isJsonContentType(normalizedRequest.postData.mimeType)) {
         // Pretty print JSON data
         if (normalizedRequest.postData.text) {
           try {
@@ -115,7 +132,19 @@ export const shellCurl: Plugin = {
             const escapedFileName = escapeSingleQuotes(`${param.fileName}${multipartValueSuffix}`)
             parts.push(`--form '${escapedName}=@${escapedFileName}'`)
           } else {
-            const escapedValue = escapeSingleQuotes(`${param.value ?? ''}${multipartValueSuffix}`)
+            const rawValue = param.value ?? ''
+            // Pretty-print parts whose contentType is JSON so the snippet stays readable,
+            // mirroring what we already do for `--data` JSON bodies above.
+            const isJsonPart = isJsonContentType(param.contentType)
+            let displayValue = rawValue
+            if (isJsonPart && rawValue) {
+              try {
+                displayValue = JSON.stringify(JSON.parse(rawValue), null, 2)
+              } catch {
+                // Fall back to the raw value if it is not valid JSON.
+              }
+            }
+            const escapedValue = escapeSingleQuotes(`${displayValue}${multipartValueSuffix}`)
             parts.push(`--form '${escapedName}=${escapedValue}'`)
           }
         })

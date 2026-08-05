@@ -107,6 +107,160 @@ describe('oauth', () => {
     })
   })
 
+  describe('Capture callback (desktop loopback)', () => {
+    const dynamicRedirectUri = 'http://127.0.0.1:54321/callback'
+
+    const authCodeScheme = {
+      authorizationCode: {
+        ...baseFlow,
+        'x-usePkce': 'no',
+        authorizationUrl,
+        tokenUrl,
+        'x-scalar-secret-redirect-uri': 'http://127.0.0.1',
+        'x-scalar-secret-token': '',
+        'x-scalar-secret-client-secret': clientSecret,
+      },
+    } satisfies OAuthFlowsObjectSecret
+
+    const implicitScheme = {
+      implicit: {
+        ...baseFlow,
+        authorizationUrl,
+        'x-scalar-secret-redirect-uri': 'http://127.0.0.1',
+        'x-scalar-secret-token': '',
+      },
+    } satisfies OAuthFlowsObjectSecret
+
+    it('builds the authorization URL without a redirect_uri and exchanges the captured code', async () => {
+      const accessToken = 'capture_access_token'
+      const capture = vi
+        .fn()
+        .mockResolvedValue([
+          null,
+          { callbackUrl: `${dynamicRedirectUri}?code=cap_code&state=${state}`, redirectUri: dynamicRedirectUri },
+        ])
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        json: () => Promise.resolve({ access_token: accessToken }),
+      })
+
+      const [error, result] = await authorizeOauth2(
+        authCodeScheme,
+        'authorizationCode',
+        selectedScopes,
+        mockServer,
+        '',
+        {},
+        undefined,
+        capture,
+      )
+
+      expect(error).toBe(null)
+      expect(result).toEqual({ accessToken })
+
+      // The capture path leaves redirect_uri to the host environment.
+      const passedUrl = new URL(capture.mock.calls[0]![0].authorizationUrl)
+      expect(passedUrl.searchParams.has('redirect_uri')).toBe(false)
+      expect(passedUrl.searchParams.get('state')).toBe(state)
+
+      // The token exchange must echo the exact redirect_uri the host used.
+      const body = vi.mocked(global.fetch).mock.calls[0]![1]?.body as URLSearchParams
+      expect(body.get('redirect_uri')).toBe(dynamicRedirectUri)
+      expect(body.get('code')).toBe('cap_code')
+    })
+
+    it('resolves the implicit access token from the captured fragment without a token exchange', async () => {
+      const accessToken = 'implicit_capture_token'
+      const capture = vi.fn().mockResolvedValue([
+        null,
+        {
+          callbackUrl: `${dynamicRedirectUri}#access_token=${accessToken}&state=${state}`,
+          redirectUri: dynamicRedirectUri,
+        },
+      ])
+      global.fetch = vi.fn()
+
+      const [error, result] = await authorizeOauth2(
+        implicitScheme,
+        'implicit',
+        selectedScopes,
+        mockServer,
+        '',
+        {},
+        undefined,
+        capture,
+      )
+
+      expect(error).toBe(null)
+      expect(result).toEqual({ accessToken })
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects when the captured state does not match', async () => {
+      const capture = vi
+        .fn()
+        .mockResolvedValue([
+          null,
+          { callbackUrl: `${dynamicRedirectUri}?code=cap_code&state=wrong`, redirectUri: dynamicRedirectUri },
+        ])
+
+      const [error, result] = await authorizeOauth2(
+        authCodeScheme,
+        'authorizationCode',
+        selectedScopes,
+        mockServer,
+        '',
+        {},
+        undefined,
+        capture,
+      )
+
+      expect(result).toBe(null)
+      expect(error?.message).toBe('State mismatch')
+    })
+
+    it('surfaces provider errors returned on the callback', async () => {
+      const capture = vi
+        .fn()
+        .mockResolvedValue([
+          null,
+          { callbackUrl: `${dynamicRedirectUri}?error=access_denied`, redirectUri: dynamicRedirectUri },
+        ])
+
+      const [error, result] = await authorizeOauth2(
+        implicitScheme,
+        'implicit',
+        selectedScopes,
+        mockServer,
+        '',
+        {},
+        undefined,
+        capture,
+      )
+
+      expect(result).toBe(null)
+      expect(error?.message).toContain('access_denied')
+    })
+
+    it('propagates a capture failure', async () => {
+      const capture = vi.fn().mockResolvedValue([new Error('Loopback bind failed'), null])
+
+      const [error, result] = await authorizeOauth2(
+        authCodeScheme,
+        'authorizationCode',
+        selectedScopes,
+        mockServer,
+        '',
+        {},
+        undefined,
+        capture,
+      )
+
+      expect(result).toBe(null)
+      expect(error?.message).toBe('Loopback bind failed')
+    })
+  })
+
   describe('Authorization Code Grant', () => {
     const scheme = {
       authorizationCode: {
@@ -219,6 +373,8 @@ describe('oauth', () => {
         authorizationCode: {
           ...scheme.authorizationCode,
           'x-usePkce': 'SHA-256',
+          // Public client: no secret, so the token request relies on PKCE alone.
+          'x-scalar-secret-client-secret': '',
           'x-scalar-security-query': {
             prompt: 'login',
             audience: 'scalar',
@@ -278,20 +434,86 @@ describe('oauth', () => {
       expect(error).toBe(null)
       expect(result).toEqual({ accessToken })
 
-      // Check fetch parameters
+      // Check fetch parameters — PKCE public clients omit client_secret and Basic auth
+      expect(global.fetch).toHaveBeenCalledWith(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: expect.any(URLSearchParams),
+      })
+
+      const pkceTokenArgs = vi.mocked(global.fetch).mock.calls[0]
+      expect(pkceTokenArgs).toBeDefined()
+      const pkceTokenBody = pkceTokenArgs![1]?.body as URLSearchParams
+      const pkceExpectedParams = new URLSearchParams()
+      pkceExpectedParams.set('client_id', flows.authorizationCode['x-scalar-secret-client-id'])
+      pkceExpectedParams.set('redirect_uri', flows.authorizationCode['x-scalar-secret-redirect-uri'])
+      pkceExpectedParams.set('code', code)
+      pkceExpectedParams.set('grant_type', 'authorization_code')
+      pkceExpectedParams.set('code_verifier', 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8')
+      expect(pkceTokenBody.toString()).toBe(pkceExpectedParams.toString())
+    })
+
+    // PKCE with a confidential client (RFC 9700 Section 2.1.1 recommends PKCE even here).
+    it('sends both the client secret and the PKCE code verifier for confidential clients', async () => {
+      const flows = {
+        authorizationCode: {
+          ...scheme.authorizationCode,
+          'x-usePkce': 'SHA-256',
+          // Confidential client: a secret is set and should be used together with PKCE.
+          'x-scalar-secret-client-secret': clientSecret,
+        },
+      } satisfies OAuthFlowsObjectSecret
+
+      const accessToken = 'confidential_pkce_access_token'
+      const code = 'confidential_pkce_auth_code'
+
+      // Mock crypto so PKCE generation is deterministic.
+      vi.spyOn(crypto, 'getRandomValues').mockImplementation((arr) => {
+        if (arr instanceof Uint8Array) {
+          for (let i = 0; i < arr.length; i++) {
+            arr[i] = i
+          }
+        }
+        return arr
+      })
+      vi.spyOn(crypto.subtle, 'digest').mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5, 6, 8, 9, 10]).buffer)
+
+      const promise = authorizeOauth2(flows, 'authorizationCode', selectedScopes, mockServer, '')
+      await flushPromises()
+
+      mockWindow.location.href = `${flows.authorizationCode['x-scalar-secret-redirect-uri']}?code=${code}&state=${state}`
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        json: () => Promise.resolve({ access_token: accessToken }),
+      })
+
+      vi.advanceTimersByTime(200)
+
+      const [error, result] = await promise
+      expect(error).toBe(null)
+      expect(result).toEqual({ accessToken })
+
+      // The confidential client authenticates with Basic auth and still proves possession via PKCE.
       expect(global.fetch).toHaveBeenCalledWith(tokenUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Authorization': `Basic ${secretAuth}`,
         },
-        body: new URLSearchParams({
-          redirect_uri: flows.authorizationCode['x-scalar-secret-redirect-uri'],
-          code,
-          grant_type: 'authorization_code',
-          code_verifier: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
-        }),
+        body: expect.any(URLSearchParams),
       })
+
+      const tokenArgs = vi.mocked(global.fetch).mock.calls[0]
+      expect(tokenArgs).toBeDefined()
+      const tokenBody = tokenArgs![1]?.body as URLSearchParams
+      const expectedParams = new URLSearchParams()
+      expectedParams.set('redirect_uri', flows.authorizationCode['x-scalar-secret-redirect-uri'])
+      expectedParams.set('code', code)
+      expectedParams.set('grant_type', 'authorization_code')
+      expectedParams.set('code_verifier', 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8')
+      expect(tokenBody.toString()).toBe(expectedParams.toString())
     })
 
     it('should include x-scalar-security-body parameters in authorization code token request', async () => {
@@ -723,7 +945,7 @@ describe('oauth', () => {
       const callArgs = vi.mocked(global.fetch).mock.calls[0]
       expect(callArgs).toBeDefined()
       const body = callArgs![1]?.body as URLSearchParams
-      // Order matches implementation: client_id/client_secret, redirect_uri, code, grant_type, code_verifier
+      // PKCE + confidential client with body credentials: client_id, client_secret, and code_verifier in body
       const expectedParams = new URLSearchParams()
       expectedParams.set('client_id', flows.authorizationCode['x-scalar-secret-client-id'])
       expectedParams.set('client_secret', flows.authorizationCode['x-scalar-secret-client-secret'])
@@ -1883,6 +2105,35 @@ describe('oauth', () => {
       expect(body.has('client_secret')).toBe(false)
       expect(body.get('grant_type')).toBe('refresh_token')
       expect(body.get('refresh_token')).toBe('refresh_token_123')
+    })
+
+    it('keeps using the client secret on refresh when PKCE mode is SHA-256', async () => {
+      const pkceConfidentialScheme = {
+        authorizationCode: {
+          ...refreshScheme.authorizationCode,
+          'x-usePkce': 'SHA-256',
+          'x-scalar-secret-client-secret': clientSecret,
+        },
+      } satisfies OAuthFlowsObjectSecret
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            access_token: 'new_access_token',
+          }),
+      })
+
+      await refreshOauth2Token(pkceConfidentialScheme, 'authorizationCode', '', mockServer)
+
+      const callArgs = vi.mocked(global.fetch).mock.calls[0]
+      const body = callArgs![1]?.body as URLSearchParams
+      // A confidential client authenticates with Basic auth, PKCE does not change that.
+      expect(body.has('client_id')).toBe(false)
+      expect(body.has('client_secret')).toBe(false)
+      expect(callArgs![1]?.headers).toEqual({
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${secretAuth}`,
+      })
     })
 
     it('omits client_id from the body for confidential clients using header credentials', async () => {

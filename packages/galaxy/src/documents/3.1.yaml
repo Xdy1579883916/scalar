@@ -127,26 +127,23 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Planet'
-                  - $ref: '#/components/schemas/PaginatedResource'
+                $id: 'https://galaxy.scalar.com/schemas/PaginatedPlanets'
+                # Bind the generic PaginatedResource template's item type to Planet via a $dynamicAnchor.
+                $defs:
+                  itemType:
+                    $dynamicAnchor: itemType
+                    $ref: '#/components/schemas/Planet'
+                $ref: '#/components/schemas/PaginatedResource'
             application/xml:
               schema:
-                allOf:
-                  - type: object
-                    xml:
-                      name: planets
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Planet'
-                  - $ref: '#/components/schemas/PaginatedResource'
+                $id: 'https://galaxy.scalar.com/schemas/PaginatedPlanetsXml'
+                xml:
+                  name: planets
+                $defs:
+                  itemType:
+                    $dynamicAnchor: itemType
+                    $ref: '#/components/schemas/Planet'
+                $ref: '#/components/schemas/PaginatedResource'
       x-post-response: |
         pm.test("Status code is 200", () => {
           pm.response.to.have.status(200);
@@ -424,6 +421,8 @@ paths:
       tags:
         - Celestial Bodies
       summary: Create a celestial body
+      description: Stars, moons, comets, the occasional rogue asteroid — if it
+        glows or drifts through the void, you can add it here.
       operationId: createCelestialBody
       requestBody:
         description: Celestial body to create
@@ -1239,9 +1238,20 @@ components:
               examples:
                 - 9376
     PaginatedResource:
-      description: A paginated resource
+      description:
+        A generic paginated resource. Specializing schemas bind the item type by declaring a
+        `$dynamicAnchor` named `itemType`, the JSON Schema 2020-12 way to express `PaginatedResource<T>`.
+      $id: 'https://galaxy.scalar.com/schemas/PaginatedResource'
+      $defs:
+        itemType:
+          $dynamicAnchor: itemType
+          not: {}
       type: object
       properties:
+        data:
+          type: array
+          items:
+            $dynamicRef: '#itemType'
         meta:
           type: object
           properties:

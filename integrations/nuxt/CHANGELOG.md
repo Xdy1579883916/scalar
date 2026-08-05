@@ -1,5 +1,75 @@
 # @scalar/nuxt
 
+## 0.6.60
+
+## 0.6.59
+
+## 0.6.58
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.6.57
+
+## 0.6.56
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.6.55
+
+## 0.6.54
+
+## 0.6.53
+
+## 0.6.52
+
+## 0.6.51
+
+## 0.6.50
+
+## 0.6.49
+
+## 0.6.48
+
+## 0.6.47
+
+### Patch Changes
+
+- [#9528](https://github.com/scalar/scalar/pull/9528): Remove the unused `onSpecUpdate` configuration option. It was never wired to a consumer, so the callback never fired.
+
+## 0.6.46
+
+## 0.6.45
+
+## 0.6.44
+
+### Patch Changes
+
+- [#9447](https://github.com/scalar/scalar/pull/9447): fix(nuxt): pre-bundle @vercel/oidc so the docs page renders under pnpm
+
+  Under pnpm's strict node_modules layout, `@vercel/oidc` (pulled in transitively by the AI assistant) was served as raw CommonJS and broke the docs page. It is now pre-bundled by Vite when it is hoisted into the project. The other CommonJS offenders are fixed at their source packages instead.
+
+## 0.6.43
+
+## 0.6.42
+
+## 0.6.41
+
+## 0.6.40
+
+## 0.6.39
+
+## 0.6.38
+
+## 0.6.37
+
+## 0.6.36
+
+## 0.6.35
+
 ## 0.6.34
 
 ## 0.6.33

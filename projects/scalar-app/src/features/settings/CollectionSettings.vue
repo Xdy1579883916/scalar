@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import {
-  cva,
-  cx,
-  ScalarButton,
-  ScalarIcon,
-  ScalarToggleInput,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarIcon } from '@scalar/components/icon'
+import { ScalarToggleInput } from '@scalar/components/toggle'
 import {
   presets,
   themeLabels,
@@ -13,6 +9,7 @@ import {
   type Theme,
   type ThemeId,
 } from '@scalar/themes'
+import { cva, cx } from '@scalar/use-hooks/useBindCx'
 import { computed } from 'vue'
 
 import IntegrationLogo from '@/features/settings/components/IntegrationLogo.vue'
@@ -139,16 +136,16 @@ const checkmarkClasses = (isActive: boolean) =>
         <a
           class="hover:text-c-1 underline underline-offset-2"
           href="https://en.wikipedia.org/wiki/Cross-origin_resource_sharing"
-          target="_blank"
-          >bypass CORS issues</a
-        >
+          target="_blank">
+          bypass CORS issues
+        </a>
         . Check the
         <a
           class="hover:text-c-1 underline underline-offset-2"
           href="https://github.com/scalar/scalar/tree/main/projects/proxy-scalar-com"
-          target="_blank"
-          >source code on GitHub</a
-        >
+          target="_blank">
+          source code on GitHub
+        </a>
         .
       </template>
 

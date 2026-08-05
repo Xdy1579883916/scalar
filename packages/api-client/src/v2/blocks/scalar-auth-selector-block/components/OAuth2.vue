@@ -1,10 +1,19 @@
 <script lang="ts">
 /**  Any config options required for the OAuth2 flow */
-export type OAuth2Options = Pick<ApiClientConfiguration, 'oauth2RedirectUri'>
+export type OAuth2Options = Pick<
+  ApiClientConfiguration,
+  'oauth2RedirectUri'
+> & {
+  /** Optional fetch override (IPC-backed on desktop) used for token exchange, refresh, and OIDC discovery */
+  customFetch?: typeof fetch
+  /** Optional redirect capture (loopback-backed on desktop) for interactive OAuth2 flows */
+  captureOAuth2Callback?: CaptureOAuth2Callback
+}
 </script>
 
 <script setup lang="ts">
-import { ScalarButton, useLoadingState } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { useLoadingState } from '@scalar/components/loading'
 import type { ApiClientConfiguration } from '@scalar/types/api-reference'
 import { pkceOptions } from '@scalar/types/entities'
 import { useToasts } from '@scalar/use-toasts'
@@ -34,6 +43,7 @@ import OAuthScopesInput from '@/v2/blocks/scalar-auth-selector-block/components/
 import {
   authorizeOauth2,
   refreshOauth2Token,
+  type CaptureOAuth2Callback,
 } from '@/v2/blocks/scalar-auth-selector-block/helpers/oauth'
 import { resolveDefaultOAuth2RedirectUri } from '@/v2/blocks/scalar-auth-selector-block/helpers/resolve-default-oauth2-redirect-url'
 import { DataTableRow } from '@/v2/components/data-table'
@@ -72,15 +82,26 @@ const {
   eventBus: WorkspaceEventBus
   /**  Any config options required for the OAuth2 flow */
   options?: OAuth2Options
+  /**
+   * Hides the Authorize / Refresh / Clear actions. Used when the form is embedded as a
+   * configuration-only view (e.g. behind a gear icon), so the host component owns the
+   * authorize action and the tokens are routed to the scheme it chooses.
+   */
+  hideActions?: boolean
 }>()
 
 const emits = defineEmits<{
   (
     e: 'update:selectedScopes',
-    payload: Pick<
-      ApiReferenceEvents['auth:update:selected-scopes'],
-      'scopes' | 'newScopePayload'
-    >,
+    payload: { scopes?: string[]; scope?: string; selected?: boolean },
+  ): void
+  (
+    e: 'upsert:scope',
+    payload: Omit<ApiReferenceEvents['auth:upsert:scopes'], 'name'>,
+  ): void
+  (
+    e: 'delete:scope',
+    payload: Omit<ApiReferenceEvents['auth:delete:scopes'], 'name'>,
   ): void
 }>()
 
@@ -94,10 +115,30 @@ type NonImplicitFlow =
   | OAuthFlowClientCredentialsSecret
   | OAuthFlowAuthorizationCodeSecret
 
-/** We filter selected scopes to only include scopes that are in this flow*/
-const selectedScopes = computed(() =>
-  selectedScopesProp.filter((scope) => scope in (flow.value.scopes ?? {})),
+/** We filter selected scopes to only include scopes that are defined on this flow (own keys only). */
+const selectedScopes = computed(() => {
+  const definedScopes = flow.value.scopes
+  if (!definedScopes) {
+    return []
+  }
+  return selectedScopesProp.filter((scope) =>
+    Object.hasOwn(definedScopes, scope),
+  )
+})
+
+/**
+ * Show the client secret whenever the flow supports one. PKCE and a client
+ * secret are independent, so confidential clients can use both together
+ * (see RFC 9700 Section 2.1.1).
+ */
+const showClientSecret = computed(
+  () => 'x-scalar-secret-client-secret' in flow.value,
 )
+
+const clientSecretValue = computed((): string => {
+  const f = flow.value as { 'x-scalar-secret-client-secret'?: string }
+  return f['x-scalar-secret-client-secret'] ?? ''
+})
 
 /** Updates the security scheme base */
 const handleOauth2Update = (
@@ -106,6 +147,12 @@ const handleOauth2Update = (
   // OpenIdConnect uses the secrets update for all
   if (scheme.type === 'openIdConnect') {
     return handleOauth2SecretsUpdate(payload)
+  }
+
+  // Only OAuth2 schemes carry flows on the document; this component is never
+  // rendered for the other scheme types.
+  if (scheme.type !== 'oauth2') {
+    return
   }
 
   eventBus.emit('auth:update:security-scheme', {
@@ -196,7 +243,14 @@ watch(
 
     hasHandledRedirectPrefill.value = true
 
-    if (newRedirectUri || !defaultRedirectUri) {
+    // The desktop loopback path computes the redirect URI at authorize time (an
+    // ephemeral 127.0.0.1 port), so persisting a default into the document would
+    // only bake in a stale, unused value. Leave it empty and show a hint instead.
+    if (
+      newRedirectUri ||
+      !defaultRedirectUri ||
+      options.captureOAuth2Callback
+    ) {
       return
     }
 
@@ -225,6 +279,8 @@ const handleAuthorize = async (): Promise<void> => {
     server,
     proxyUrl,
     getEnvironmentVariables(environment),
+    options.customFetch,
+    options.captureOAuth2Callback,
   )
 
   await loader.clear()
@@ -273,6 +329,7 @@ const handleRefresh = async (): Promise<void> => {
     proxyUrl,
     server,
     getEnvironmentVariables(environment),
+    options.customFetch,
   )
 
   await loader.clear()
@@ -334,7 +391,9 @@ const handleSecretLocationUpdate = (value: string): void => {
       </RequestAuthDataTableInput>
     </DataTableRow>
 
-    <DataTableRow class="min-w-full">
+    <DataTableRow
+      v-if="!hideActions"
+      class="min-w-full">
       <div class="flex h-8 items-center justify-end gap-2 border-t">
         <ScalarButton
           v-if="supportsRefreshToken"
@@ -394,7 +453,11 @@ const handleSecretLocationUpdate = (value: string): void => {
       <RequestAuthDataTableInput
         :environment
         :modelValue="flow['x-scalar-secret-redirect-uri']"
-        placeholder="Optional redirect URL"
+        :placeholder="
+          options.captureOAuth2Callback
+            ? `${resolveDefaultOAuth2RedirectUri(options) || 'http://127.0.0.1'} (handled automatically)`
+            : 'Optional redirect URL'
+        "
         @update:modelValue="
           (v) => {
             hasHandledRedirectPrefill = true
@@ -448,10 +511,10 @@ const handleSecretLocationUpdate = (value: string): void => {
       </RequestAuthDataTableInput>
     </DataTableRow>
 
-    <DataTableRow v-if="'x-scalar-secret-client-secret' in flow">
+    <DataTableRow v-if="showClientSecret">
       <RequestAuthDataTableInput
         :environment
-        :modelValue="flow['x-scalar-secret-client-secret']"
+        :modelValue="clientSecretValue"
         placeholder="XYZ123"
         type="password"
         @update:modelValue="
@@ -499,10 +562,14 @@ const handleSecretLocationUpdate = (value: string): void => {
         :flow
         :flowType="type"
         :selectedScopes
-        @update:selectedScopes="(v) => emits('update:selectedScopes', v)" />
+        @update:selectedScopes="(v) => emits('update:selectedScopes', v)"
+        @upsert:scope="(v) => emits('upsert:scope', v)"
+        @delete:scope="(v) => emits('delete:scope', v)" />
     </DataTableRow>
 
-    <DataTableRow class="min-w-full">
+    <DataTableRow
+      v-if="!hideActions"
+      class="min-w-full">
       <div class="flex h-8 w-full items-center justify-end border-t">
         <!-- Allow clearing the oauth section and going back to discovery -->
         <ScalarButton

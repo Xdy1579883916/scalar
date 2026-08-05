@@ -2,12 +2,14 @@
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import type {
+  OpenApiDocument,
   ParameterObject,
   ReferenceType,
   RequestBodyObject,
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed } from 'vue'
 
+import { useLocalization } from '@/features/localization'
 import { flattenDeepObjectQueryParameter } from '@/features/Operation/helpers/flatten-deep-object-query-parameter'
 import { shouldIgnoreEntity } from '@/features/Operation/helpers/should-ignore-entity'
 import type { OperationProps } from '@/features/Operation/Operation.vue'
@@ -20,11 +22,17 @@ const { parameters = [], requestBody } = defineProps<{
   parameters?: ReferenceType<ParameterObject>[]
   requestBody?: RequestBodyObject | undefined
   eventBus: WorkspaceEventBus | null
+  /** The document the operation belongs to, used to resolve schema references for display */
+  document?: OpenApiDocument
   options: Pick<
     OperationProps['options'],
-    'hideModels' | 'orderRequiredPropertiesFirst' | 'orderSchemaPropertiesBy'
+    | 'hideModels'
+    | 'orderRequiredPropertiesFirst'
+    | 'orderSchemaPropertiesBy'
+    | 'expandAllSchemaProperties'
   >
 }>()
+const { translate } = useLocalization()
 
 /** Thread the selected request body content type up to the layout */
 const selectedContentType = defineModel<string>('selectedContentType')
@@ -58,37 +66,41 @@ const splitParameters = computed(() =>
   <!-- Path parameters-->
   <ParameterList
     :breadcrumb="breadcrumb ? [...breadcrumb, 'path'] : undefined"
+    :document="document"
     :eventBus="eventBus"
     :options="options"
     :parameters="splitParameters['path']">
-    <template #title>Path Parameters</template>
+    <template #title>{{ translate('operation.pathParameters') }}</template>
   </ParameterList>
 
   <!-- Query parameters -->
   <ParameterList
     :breadcrumb="breadcrumb ? [...breadcrumb, 'query'] : undefined"
+    :document="document"
     :eventBus="eventBus"
     :options="options"
     :parameters="splitParameters['query']">
-    <template #title>Query Parameters</template>
+    <template #title>{{ translate('operation.queryParameters') }}</template>
   </ParameterList>
 
   <!-- Headers -->
   <ParameterList
     :breadcrumb="breadcrumb ? [...breadcrumb, 'headers'] : undefined"
+    :document="document"
     :eventBus="eventBus"
     :options="options"
     :parameters="splitParameters['header']">
-    <template #title>Headers</template>
+    <template #title>{{ translate('operation.headers') }}</template>
   </ParameterList>
 
   <!-- Cookies -->
   <ParameterList
     :breadcrumb="breadcrumb ? [...breadcrumb, 'cookies'] : undefined"
+    :document="document"
     :eventBus="eventBus"
     :options="options"
     :parameters="splitParameters['cookie']">
-    <template #title>Cookies</template>
+    <template #title>{{ translate('operation.cookies') }}</template>
   </ParameterList>
 
   <!-- Request body -->
@@ -96,9 +108,10 @@ const splitParameters = computed(() =>
     v-if="requestBody"
     v-model:selectedContentType="selectedContentType"
     :breadcrumb="breadcrumb ? [...breadcrumb, 'body'] : undefined"
+    :document="document"
     :eventBus="eventBus"
     :options="options"
     :requestBody="requestBody">
-    <template #title>Body</template>
+    <template #title>{{ translate('operation.body') }}</template>
   </RequestBody>
 </template>

@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { cva, ScalarIconButton } from '@scalar/components'
+import { ScalarIconButton } from '@scalar/components/icon-button'
 import { ScalarIconList, ScalarIconX } from '@scalar/icons'
+import { cva } from '@scalar/use-hooks/useBindCx'
+
+import { useLocalization } from '@/features/localization'
 
 defineProps<{
   breadcrumb: string
   isSidebarOpen: boolean
   showSidebar: boolean
 }>()
+const { translate } = useLocalization()
 
 const emit = defineEmits<{
   (e: 'toggleSidebar'): void
@@ -22,7 +26,7 @@ const variants = cva({
   base: 'lg:hidden items-center bg-b-1 sticky top-(--scalar-custom-header-height,0) z-10 [grid-area:header]',
   variants: {
     open: {
-      true: 'h-(--refs-sidebar-height) custom-scrollbar flex flex-col',
+      true: 'h-(--refs-sidebar-height) custom-scrollbar flex flex-col z-50',
     },
   },
 })
@@ -43,7 +47,11 @@ const variants = cva({
       <ScalarIconButton
         v-if="showSidebar"
         :icon="isSidebarOpen ? ScalarIconX : ScalarIconList"
-        :label="isSidebarOpen ? 'Close Menu' : 'Open Menu'"
+        :label="
+          isSidebarOpen
+            ? translate('navigation.closeMenu')
+            : translate('navigation.openMenu')
+        "
         size="md"
         @click="emit('toggleSidebar')" />
 

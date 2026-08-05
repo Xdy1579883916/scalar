@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ApiReferenceConfiguration } from '@scalar/types/api-reference'
+import type { AsyncApiInfoObject } from '@scalar/types/asyncapi/3.1'
 import type { Heading } from '@scalar/types/legacy'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import type {
@@ -19,13 +20,14 @@ const {
   eventBus,
   documentDownloadType = 'both',
   documentUrl,
+  documentType,
 } = defineProps<{
   /** Optional unique identifier for the info block. */
   id?: string
-  /** Original openapi version of the input document */
-  oasVersion?: string
+  /** Original specification version of the input document (OpenAPI or AsyncAPI). */
+  specificationVersion?: string
   /** The Info object from the OpenAPI document. */
-  info: InfoObject | undefined
+  info: InfoObject | AsyncApiInfoObject | undefined
   /** The external documentation object from the OpenAPI document, if present. */
   externalDocs?: ExternalDocumentationObject
   /** OpenAPI extension fields at the document level. */
@@ -42,6 +44,8 @@ const {
   documentDownloadType?: ApiReferenceConfiguration['documentDownloadType']
   /** URL of the OpenAPI document. Used when documentDownloadType is 'direct'. */
   documentUrl?: string
+  /** The kind of document being rendered. Drives download button labels. */
+  documentType?: 'openapi' | 'asyncapi'
 }>()
 
 /**
@@ -58,12 +62,13 @@ const introCardsSlot = computed(() =>
   <IntroductionLayout
     :id
     :documentExtensions
+    :documentType
     :eventBus="eventBus"
     :externalDocs
     :headingSlugGenerator
     :info
     :infoExtensions
-    :oasVersion>
+    :specificationVersion>
     <template #[introCardsSlot]>
       <IntroductionCard :row="layout === 'classic'">
         <slot name="selectors" />
@@ -72,6 +77,7 @@ const introCardsSlot = computed(() =>
     <template #download-link>
       <DownloadLink
         :documentDownloadType
+        :documentType
         :documentUrl
         :eventBus />
     </template>

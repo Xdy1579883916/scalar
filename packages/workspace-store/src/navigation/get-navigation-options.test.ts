@@ -209,6 +209,27 @@ describe('get-navigation-options', () => {
     expect(id).toBe('api/webhook/POST-orderCreated')
   })
 
+  // Event-style webhook names commonly mix underscores and dots. Dots are kept
+  // so the deep link stays close to the event name, instead of being dropped
+  // and joining adjacent words (e.g. "account_holder.created" -> "account-holdercreated").
+  it.each([
+    ['account_holder.created', 'pet-store/webhook/POST/account-holder.created'],
+    ['card_transaction.updated', 'pet-store/webhook/POST/card-transaction.updated'],
+    [
+      'tokenization.two_factor_authentication_code',
+      'pet-store/webhook/POST/tokenization.two-factor-authentication-code',
+    ],
+  ])('keeps dots in webhook name %s while turning underscores into separators', (name, expected) => {
+    const options = getNavigationOptions('Pet Store')
+    const id = options.generateId({
+      type: 'webhook',
+      parentId: 'pet-store',
+      name,
+      method: 'post',
+    })
+    expect(id).toBe(expected)
+  })
+
   it('generates model ID for models root when name is empty', () => {
     const options = getNavigationOptions('Pet Store')
     const id = options.generateId({
@@ -218,6 +239,22 @@ describe('get-navigation-options', () => {
     expect(id).toBe('pet-store/models')
   })
 
+  it('generates schemas section slug when modelsSectionLabel is Schemas', () => {
+    const options = getNavigationOptions('Pet Store', { modelsSectionLabel: 'Schemas' })
+    const sectionId = options.generateId({
+      type: 'model',
+      parentId: 'pet-store',
+    })
+    const schemaId = options.generateId({
+      type: 'model',
+      parentId: 'pet-store',
+      name: 'User',
+    })
+
+    expect(sectionId).toBe('pet-store/schemas')
+    expect(schemaId).toBe('pet-store/schemas/User')
+  })
+
   it('generates model ID with name (preserves case)', () => {
     const options = getNavigationOptions('Pet Store')
     const id = options.generateId({
@@ -225,7 +262,7 @@ describe('get-navigation-options', () => {
       parentId: 'pet-store',
       name: 'Pet Schema',
     })
-    expect(id).toBe('pet-store/model/Pet-Schema')
+    expect(id).toBe('pet-store/models/Pet-Schema')
   })
 
   it('generates model ID with parent tag prefix (preserves case)', () => {
@@ -239,7 +276,7 @@ describe('get-navigation-options', () => {
         tag: { name: 'Models' },
       },
     })
-    expect(id).toBe('pet-store/tag/models/model/User')
+    expect(id).toBe('pet-store/tag/models/models/User')
   })
 
   it('generates unique model IDs when schema names differ only by casing', () => {
@@ -254,8 +291,8 @@ describe('get-navigation-options', () => {
       parentId: 'api',
       name: 'string',
     })
-    expect(idString).toBe('api/model/String')
-    expect(idLower).toBe('api/model/string')
+    expect(idString).toBe('api/models/String')
+    expect(idLower).toBe('api/models/string')
     expect(idString).not.toBe(idLower)
   })
 
@@ -269,7 +306,7 @@ describe('get-navigation-options', () => {
       parentId: 'api',
       name: 'Order',
     })
-    expect(id).toBe('api/model/schema-order')
+    expect(id).toBe('api/models/schema-order')
   })
 
   it('generates example ID with parent prefix', () => {

@@ -51,6 +51,25 @@ describe('executeHook', () => {
     expect(result.requestBuilder.headers.get('X-Custom-Header')).toBe('test-value')
   })
 
+  it('forwards server and customFetch to the beforeRequest hook', async () => {
+    const requestBuilder = createFactory()
+    const server = { url: 'https://api.example.com' } as never
+    const customFetch = fetch
+    let received: { server?: unknown; customFetch?: unknown } = {}
+    const plugin: ClientPlugin = {
+      hooks: {
+        beforeRequest: (payload) => {
+          received = { server: payload.server, customFetch: payload.customFetch }
+        },
+      },
+    }
+
+    await executeHook({ ...beforePayload(requestBuilder), server, customFetch }, 'beforeRequest', [plugin])
+
+    expect(received.server).toBe(server)
+    expect(received.customFetch).toBe(customFetch)
+  })
+
   it('chains multiple plugins in order and applies all modifications', async () => {
     const requestBuilder = createFactory()
 
@@ -128,6 +147,30 @@ describe('executeHook', () => {
     const result = await executeHook(beforePayload(requestBuilder), 'beforeRequest', [asyncPlugin])
 
     expect(result.requestBuilder.headers.get('X-Async')).toBe('completed')
+  })
+
+  it('executes requestBuilt hooks with the exact request instance so mutations apply', async () => {
+    const requestBuilder = createFactory()
+    const request = new Request('https://example.com/api/test', { method: 'GET' })
+
+    const plugin: ClientPlugin = {
+      hooks: {
+        requestBuilt: async (payload) => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+
+          payload.request.headers.set('X-Signature', 'abc123')
+        },
+      },
+    }
+
+    const result = await executeHook(
+      { request, requestBuilder, document: {} as never, operation: {} as never },
+      'requestBuilt',
+      [plugin],
+    )
+
+    expect(result.request).toBe(request)
+    expect(request.headers.get('X-Signature')).toBe('abc123')
   })
 
   it('maintains type safety with HookPayloadMap for different hook types', async () => {

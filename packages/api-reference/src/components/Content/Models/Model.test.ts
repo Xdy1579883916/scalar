@@ -53,6 +53,7 @@ describe('Model', () => {
     hideModels: false,
     orderRequiredPropertiesFirst: false,
     orderSchemaPropertiesBy: 'alpha' as const,
+    expandAllSchemaProperties: false,
   }
 
   const mockConfigModern = {
@@ -60,6 +61,7 @@ describe('Model', () => {
     hideModels: false,
     orderRequiredPropertiesFirst: false,
     orderSchemaPropertiesBy: 'alpha' as const,
+    expandAllSchemaProperties: false,
   }
 
   describe('layout rendering', () => {
@@ -137,6 +139,29 @@ describe('Model', () => {
       expect(wrapper.findComponent({ name: 'CompactSection' }).props('modelValue')).toBe(true)
       expect(wrapper.findComponent({ name: 'CompactSection' }).text()).toContain('id')
       expect(wrapper.findComponent({ name: 'CompactSection' }).text()).toContain('name')
+    })
+
+    it('names the collapse trigger after the title it renders, not the schema key', () => {
+      const wrapper = mount(Model, {
+        props: {
+          id: 'user',
+          name: 'User',
+          eventBus,
+          schema: { title: 'UserDetailsHeader', type: 'object' } as SchemaObject,
+          isCollapsed: false,
+          options: mockConfigModern,
+        },
+      })
+
+      // The trigger is named from the heading it renders (the title), so the accessible
+      // name always matches the visible text and cannot regress to the schema key —
+      // otherwise it would announce a label that never appears on screen, a WCAG 2.5.3
+      // (Label in Name) failure.
+      const trigger = wrapper.get('button')
+      const labelledby = trigger.attributes('aria-labelledby')
+
+      expect(labelledby).toBeTruthy()
+      expect(wrapper.get(`[id="${labelledby}"]`).text()).toContain('UserDetailsHeader')
     })
   })
 })

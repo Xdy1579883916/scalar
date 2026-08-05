@@ -80,12 +80,28 @@
   input:where(:not([type="button"], [type="reset"], [type="submit"])),
   select,
   textarea {
-    border-radius: var(--scalar-radius);
+    border-radius: var(--scalar-radius-md);
     border-width: 1px;
   }
 
+  /**
+   * Align text form controls to the writing direction by default.
+   *
+   * The universal reset above sets `text-align: inherit`, which overrides the controls' built-in
+   * `start` alignment with whatever an ancestor resolves to — including a physical `left` from a
+   * Tailwind `text-left` utility, which does not flip for RTL. Re-asserting the logical `start`
+   * keeps inputs reading correctly in both LTR and RTL documents.
+   */
+  input,
+  select,
+  textarea {
+    text-align: start;
+  }
+
   /** Style placeholder text */
-  input::placeholder {
+  input::placeholder,
+  text-area::placeholder,
+  ::-webkit-input-placeholder {
     color: var(--scalar-color-3);
     font-family: var(--scalar-font);
   }
@@ -109,7 +125,6 @@
   /** Add outline for focus visible */
   :focus-visible {
     outline-style: solid;
-    border-radius: var(--scalar-radius);
   }
 
   /** Set outline offset for buttons */

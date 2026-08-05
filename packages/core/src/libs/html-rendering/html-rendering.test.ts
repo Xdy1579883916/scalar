@@ -1,10 +1,9 @@
-import type { ApiReferenceConfigurationWithSource } from '@scalar/types/api-reference'
 import {
   apiReferenceConfigurationWithSourceSchema,
   htmlRenderingConfigurationSchema,
 } from '@scalar/schemas/api-reference'
+import type { ApiReferenceConfigurationWithSource } from '@scalar/types/api-reference'
 import { coerce } from '@scalar/validation'
-
 import { describe, expect, it } from 'vitest'
 
 import { getConfiguration, getHtmlDocument, getScriptTags } from './html-rendering'
@@ -123,9 +122,9 @@ describe('html-rendering', () => {
         generateTagSlug: (tag) => `tag-${tag.name}`,
         generateOperationSlug: (operation) => `${operation.method}-${operation.path}`,
         generateWebhookSlug: (webhook) => `webhook-${webhook.name}`,
+        setPageTitle: ({ title }) => `API Reference - ${title}`,
         onLoaded: () => console.log('loaded'),
         redirect: (path) => path.replace('/old', '/new'),
-        onSpecUpdate: (spec) => console.log('spec updated', spec),
         onServerChange: (server) => console.log('server changed', server),
         onDocumentSelect: () => console.log('document changed'),
         onBeforeRequest: ({ request }) => console.log('before request', request),
@@ -144,9 +143,9 @@ describe('html-rendering', () => {
       expect(tags).toContain('"generateTagSlug": (tag) => `tag-${tag.name}`')
       expect(tags).toContain('"generateOperationSlug": (operation) => `${operation.method}-${operation.path}`')
       expect(tags).toContain('"generateWebhookSlug": (webhook) => `webhook-${webhook.name}`')
+      expect(tags).toContain('"setPageTitle": ({ title }) => `API Reference - ${title}`')
       expect(tags).toContain('"onLoaded": () => console.log("loaded")')
       expect(tags).toContain('"redirect": (path) => path.replace("/old", "/new")')
-      expect(tags).toContain('"onSpecUpdate": (spec) => console.log("spec updated", spec)')
       expect(tags).toContain('"onServerChange": (server) => console.log("server changed", server)')
       expect(tags).toContain('"onDocumentSelect": () => console.log("document changed")')
       expect(tags).toContain('"onBeforeRequest": ({ request }) => console.log("before request", request)')

@@ -88,6 +88,7 @@ export type OperationBlockProps = {
 }
 </script>
 <script setup lang="ts">
+import { generateClientOptions } from '@scalar/blocks/code-example'
 import { ERRORS } from '@scalar/helpers/errors/normalize-error'
 import { isElectron } from '@scalar/helpers/general/is-electron'
 import { buildSafeBodyRequest } from '@scalar/helpers/http/can-method-have-body'
@@ -97,6 +98,7 @@ import {
   AVAILABLE_CLIENTS,
   type AvailableClients,
 } from '@scalar/types/snippetz'
+import { useClipboard } from '@scalar/use-hooks/useClipboard'
 import { useToasts } from '@scalar/use-toasts'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import type { SelectedSecurity } from '@scalar/workspace-store/entities/auth'
@@ -111,6 +113,7 @@ import {
   createVariablesStoreForRequest,
   getEnvironmentVariables,
   requestFactory,
+  resolveExecutableRequestUrl,
   type MergedSecuritySchemes,
   type RequestPayload,
   type SecuritySchemeObjectSecret,
@@ -129,6 +132,10 @@ import ViewLayoutContent from '@/components/ViewLayout/ViewLayoutContent.vue'
 import { harToFetchRequest } from '@/v2/blocks/operation-block/helpers/har-to-fetch-request'
 import { harToFetchResponse } from '@/v2/blocks/operation-block/helpers/har-to-fetch-response'
 import {
+  getCookieRequestUrl,
+  getResponseCookieActions,
+} from '@/v2/blocks/operation-block/helpers/persist-response-cookies'
+import {
   getOperationExampleKey,
   isStreamingResponse,
   responseCache,
@@ -138,7 +145,6 @@ import {
   type ResponseInstance,
 } from '@/v2/blocks/operation-block/helpers/send-request'
 import { validatePathParameters } from '@/v2/blocks/operation-block/helpers/validate-path-parameters'
-import { generateClientOptions } from '@/v2/blocks/operation-code-sample'
 import { RequestBlock } from '@/v2/blocks/request-block'
 import { ResponseBlock } from '@/v2/blocks/response-block'
 import { type History } from '@/v2/blocks/scalar-address-bar-block'
@@ -159,6 +165,7 @@ const {
   hideClientButton,
   httpClients = AVAILABLE_CLIENTS,
   history = [],
+  layout,
   method,
   operation,
   path,
@@ -182,6 +189,7 @@ const {
 const clientOptions = computed(() => generateClientOptions(httpClients))
 
 const { toast } = useToasts()
+const { copyToClipboard } = useClipboard()
 
 // Refs
 const abortController = ref<AbortController | null>(null)
@@ -190,6 +198,67 @@ const requestPayload = ref<RequestPayload | null>(null)
 
 /** Cancel the request */
 const cancelRequest = () => abortController.value?.abort(ERRORS.REQUEST_ABORTED)
+
+/**
+ * Persist server-set cookies from a response into the document cookie jar.
+ *
+ * Scalar keeps its own cookie jar because browsers hide `Set-Cookie` from `fetch`.
+ * Mirroring browser behavior, cookies are stored scoped to the request host and
+ * path and removed when the server expires them, so a value like a Django CSRF
+ * token stays available for later PUT/PATCH requests after a page reload.
+ */
+const persistResponseCookies = (sendResult: {
+  response: ResponseInstance
+  requestPayload: RequestPayload
+}) => {
+  const actions = getResponseCookieActions({
+    cookieHeaderKeys: sendResult.response.cookieHeaderKeys ?? [],
+    documentCookies,
+    requestUrl: getCookieRequestUrl(String(sendResult.requestPayload[0])),
+  })
+
+  for (const action of actions) {
+    if (action.type === 'delete') {
+      eventBus.emit('cookie:delete:cookie', {
+        collectionType: 'document',
+        cookieName: action.cookieName,
+        index: action.index,
+      })
+      continue
+    }
+
+    eventBus.emit('cookie:upsert:cookie', {
+      collectionType: 'document',
+      payload: action.cookie,
+      ...(action.index === undefined ? {} : { index: action.index }),
+    })
+  }
+}
+
+/**
+ * Copy the executable URL — same pipeline as Send (`requestFactory` +
+ * `resolveExecutableRequestUrl`), including security query params.
+ */
+const copyAddressBarUrl = async (): Promise<void> => {
+  const { request } = requestFactory({
+    defaultHeaders,
+    environment,
+    exampleName: exampleKey,
+    globalCookies: [...workspaceCookies, ...documentCookies],
+    method,
+    operation,
+    path,
+    proxyUrl,
+    server,
+    selectedSecuritySchemes,
+    isElectron: isElectron(),
+    requestBodyCompositionSelection,
+  })
+
+  await copyToClipboard(
+    resolveExecutableRequestUrl(request, getEnvironmentVariables(environment)),
+  )
+}
 
 /** Execute the current operation example */
 const handleExecute = async () => {
@@ -235,6 +304,8 @@ const handleExecute = async () => {
       document,
       operation,
       variablesStore,
+      server,
+      customFetch: toValue(options)?.customFetch,
     },
     'beforeRequest',
     plugins,
@@ -246,30 +317,35 @@ const handleExecute = async () => {
   }
 
   // Build the fetch Request after hooks may have mutated the factory
-  const requestResult = (() => {
-    try {
-      return {
-        ok: true,
-        result: buildRequest(requestBuilder, {
-          envVariables,
-        }),
-      } as const
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return {
-        ok: false,
-        error: message,
-      } as const
-    }
-  })()
-
-  if (requestResult.ok === false) {
-    toast(requestResult.error, 'error')
+  const built = buildRequest(requestBuilder, {
+    envVariables,
+    allowMissingRequestServerBase: layout === 'modal',
+  })
+  if (!built.ok) {
+    toast(built.message ?? built.error, 'error')
     return
   }
 
   // Store the abort controller for cancellation
-  abortController.value = requestResult.result.controller
+  abortController.value = built.data.controller
+
+  // Build the fetch Request once so the requestBuilt hook observes the exact bytes that are
+  // sent. Rebuilding it later would generate a different multipart boundary, which breaks
+  // plugins that hash the body (for example, request signing).
+  const request = buildSafeBodyRequest(...built.data.requestPayload)
+
+  // Execute the requestBuilt hook (plugins receive the exact fetch Request that will be sent)
+  await executeHook(
+    {
+      request,
+      requestBuilder,
+      document,
+      operation,
+      variablesStore,
+    },
+    'requestBuilt',
+    plugins,
+  )
 
   // Execute the hooks
   eventBus.emit('hooks:on:request:sent', {
@@ -282,8 +358,9 @@ const handleExecute = async () => {
 
   /** Execute the request */
   const [sendError, sendResult] = await sendRequest({
-    isUsingProxy: requestResult.result.isUsingProxy,
-    requestPayload: requestResult.result.requestPayload,
+    isUsingProxy: built.data.isUsingProxy,
+    requestPayload: built.data.requestPayload,
+    request,
     plugins,
     customFetch: toValue(options)?.customFetch,
   })
@@ -335,6 +412,10 @@ const handleExecute = async () => {
   response.value = sendResult.response
   requestPayload.value = sendResult.requestPayload
 
+  // Persist server-set cookies into the document jar so values like a CSRF token
+  // survive a page reload and get replayed on the next request, like a browser would.
+  persistResponseCookies(sendResult)
+
   // Cache non-streaming responses so they can be restored when navigating back
   if (!isStreamingResponse(sendResult.response)) {
     responseCache.set(getOperationExampleKey(method, path, exampleKey), {
@@ -347,10 +428,16 @@ const handleExecute = async () => {
 onMounted(() => {
   eventBus.on('operation:send:request:hotkey', handleExecute)
   eventBus.on('operation:cancel:request', cancelRequest)
+  eventBus.on('copy-url:address-bar', copyAddressBarUrl)
+
+  // Let plugins warm up per-operation resources (e.g. the scripts sandbox) so the first request
+  // does not pay their cold-start cost.
+  void executeHook({ document, operation }, 'onRequestMount', plugins)
 })
 onBeforeUnmount(() => {
   eventBus.off('operation:send:request:hotkey', handleExecute)
   eventBus.off('operation:cancel:request', cancelRequest)
+  eventBus.off('copy-url:address-bar', copyAddressBarUrl)
 })
 
 const operationHistory = computed<History[]>(() =>
@@ -422,22 +509,59 @@ const handleNavigateSettings = () => {
 }
 
 /**
- * When the path, method, or example key changes: save current response to
- * cache (so it can be restored when navigating back), then restore from cache
- * for the new operation or clear if no cached response. Response is only
- * cleared on page refresh or when making a new request for that operation.
+ * When the path, method, or example key changes, restore the response panel
+ * for the new operation from the best available source:
+ *
+ *   1. `responseCache` — in-memory, populated on every successful send.
+ *      Has the live response object (including streams) so it wins.
+ *   2. `history` — persisted in the workspace store. Used as a fallback when
+ *      the in-memory cache is empty (page reload, fresh app session, etc.)
+ *      so navigating to an operation that has been called before shows the
+ *      last response instead of an empty panel.
+ *   3. Otherwise clear.
+ *
+ * Only the response is restored from history — the user's request inputs are
+ * left alone, so we never silently overwrite an in-progress draft.
  */
 watch(
   [() => path, () => method, () => exampleKey],
   ([newPath, newMethod, newExampleKey]) => {
-    const newKey = getOperationExampleKey(newMethod, newPath, newExampleKey)
-    const cached = responseCache.get(newKey)
+    const cached = responseCache.get(
+      getOperationExampleKey(newMethod, newPath, newExampleKey),
+    )
+
     if (cached) {
       response.value = cached.response
       requestPayload.value = cached.requestPayload
     } else {
-      response.value = null
-      requestPayload.value = null
+      // History is keyed only by document/path/method but each entry carries
+      // the example it came from, so we walk from the end and pick the most
+      // recent entry that matches the active example. Otherwise a cache miss
+      // on example B would restore example A's response. Only runs on a
+      // cache miss — the common case (in-session navigation) skips it.
+      const latest = (() => {
+        for (let i = history.length - 1; i >= 0; i--) {
+          const entry = history[i]
+          if (entry?.meta.example === newExampleKey) {
+            return entry
+          }
+        }
+        return undefined
+      })()
+
+      if (latest) {
+        response.value = harToFetchResponse({
+          harResponse: latest.response,
+          url: latest.request.url,
+          method: newMethod,
+          path: newPath,
+          duration: latest.time,
+        })
+        requestPayload.value = null
+      } else {
+        response.value = null
+        requestPayload.value = null
+      }
     }
 
     // Cancel any in-flight request

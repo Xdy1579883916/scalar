@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ScalarButton } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
 import { ScalarIconPlus } from '@scalar/icons'
 import { resolve } from '@scalar/workspace-store/resolve'
 import type { SchemaObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { isArraySchema } from '@scalar/workspace-store/schemas/v3.1/strict/type-guards'
 import { computed, ref } from 'vue'
+
+import { useLocalization } from '@/features/localization'
 
 import SchemaEnumPropertyItem from './SchemaEnumPropertyItem.vue'
 
@@ -14,25 +16,32 @@ const { value } = defineProps<{
   /** Whether to display the enum for property names */
   propertyNames?: boolean
 }>()
+const { translate } = useLocalization()
 
 const ENUM_DISPLAY_THRESHOLD = 9
 const INITIAL_VISIBLE_COUNT = 5
 const THIN_SPACE = '\u2009'
 
 /**
+ * Resolves the schema that carries the enum values.
+ * For arrays, the enum and its x-enum-* metadata live on the items schema, so
+ * both the values and their varnames/descriptions have to be read from there.
+ */
+const enumSchema = computed(() => {
+  if (!value) {
+    return undefined
+  }
+  if (value.enum) {
+    return value
+  }
+  return isArraySchema(value) ? resolve.schema(value.items) : undefined
+})
+
+/**
  * Extracts enum values from the schema object.
  * Handles both direct enum values and nested enum arrays.
  */
-const enumValues = computed(() => {
-  if (!value) {
-    return []
-  }
-  return (
-    value.enum ||
-    (isArraySchema(value) && resolve.schema(value.items)?.enum) ||
-    []
-  )
-})
+const enumValues = computed(() => enumSchema.value?.enum ?? [])
 
 /**
  * Determines if we should show the long enum list UI.
@@ -64,8 +73,9 @@ const getEnumValueDescription = (
   enumValue: any,
   index: number,
 ): string | undefined => {
+  const schema = enumSchema.value
   const descriptions =
-    value?.['x-enumDescriptions'] ?? value?.['x-enum-descriptions']
+    schema?.['x-enumDescriptions'] ?? schema?.['x-enum-descriptions']
 
   if (!descriptions) {
     return undefined
@@ -87,7 +97,8 @@ const getEnumValueDescription = (
  * This supports both x-enum-varnames and x-enumNames extensions.
  */
 const formatEnumValueWithName = (enumValue: any, index: number): string => {
-  const varNames = value?.['x-enum-varnames'] ?? value?.['x-enumNames']
+  const varNames =
+    enumSchema.value?.['x-enum-varnames'] ?? enumSchema.value?.['x-enumNames']
   const varName = Array.isArray(varNames) ? varNames[index] : undefined
   return varName
     ? `${enumValue}${THIN_SPACE}=${THIN_SPACE}${varName}`
@@ -111,12 +122,12 @@ const toggleExpanded = () => {
     <div
       v-if="propertyNames"
       class="property-enum-property-names">
-      property names
+      {{ translate('common.propertyNames') }}
     </div>
     <div
       v-else
       class="property-enum-property-names">
-      values
+      {{ translate('common.values') }}
     </div>
     <ul class="property-enum-values">
       <!-- Visible enum values -->
@@ -148,7 +159,11 @@ const toggleExpanded = () => {
           <ScalarIconPlus
             :class="{ 'rotate-45': isExpanded }"
             weight="bold" />
-          {{ isExpanded ? 'Hide values' : 'Show all values' }}
+          {{
+            isExpanded
+              ? translate('common.hideValues')
+              : translate('common.showAllValues')
+          }}
         </ScalarButton>
       </li>
     </ul>

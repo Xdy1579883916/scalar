@@ -4,14 +4,11 @@
   for automatic updates when the source document changes.
 -->
 <script setup lang="ts">
-import {
-  ScalarButton,
-  ScalarIcon,
-  ScalarModal,
-  type ModalState,
-  type ScalarListboxOption,
-  type WorkspaceGroup,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarIcon } from '@scalar/components/icon'
+import { type ScalarListboxOption } from '@scalar/components/listbox'
+import { type WorkspaceGroup } from '@scalar/components/menu'
+import { ScalarModal, type ModalState } from '@scalar/components/modal'
 import { isLocalUrl } from '@scalar/helpers/url/is-local-url'
 import { isValidUrl } from '@scalar/helpers/url/is-valid-url'
 import { type LoaderPlugin } from '@scalar/json-magic/bundle'
@@ -33,6 +30,8 @@ const {
   modalState,
   isLoading = false,
   fileLoader,
+  fetch,
+  defaultProxyUrl,
 } = defineProps<{
   /** The event data for the import */
   importEventData: ImportEventData | null
@@ -42,10 +41,24 @@ const {
   isLoading?: boolean
   /** The file loader */
   fileLoader?: LoaderPlugin
+  /**
+   * Custom fetch used to retrieve documents from a URL. On desktop this is the
+   * IPC-backed fetch; the workspace store needs it too, otherwise the
+   * renderer's global fetch is blocked by the Content Security Policy.
+   */
+  fetch?: (
+    input: string | URL | globalThis.Request,
+    init?: RequestInit,
+  ) => Promise<Response>
   /** List of workspace groups */
   workspaceGroups: WorkspaceGroup[]
   /** The active workspace */
   activeWorkspace: ScalarListboxOption | null
+  /**
+   * Default CORS proxy when loading imports (`null` means skip the proxy).
+   * Derived from client layout in app state.
+   */
+  defaultProxyUrl: string | null
 }>()
 
 const emit = defineEmits<{
@@ -66,6 +79,10 @@ const watchMode = ref(false)
 // Create the workspace store with the file loader in order to import files
 const workspaceStore = createWorkspaceStore({
   fileLoader,
+  fetch,
+  meta: {
+    'x-scalar-active-proxy': defaultProxyUrl,
+  },
 })
 
 /** The title of the active document or a fallback */

@@ -1,5 +1,51 @@
 # @scalar/core
 
+## 0.5.26
+
+## 0.5.25
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.5.24
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.5.23
+
+## 0.5.22
+
+## 0.5.21
+
+## 0.5.20
+
+## 0.5.19
+
+## 0.5.18
+
+## 0.5.17
+
+## 0.5.16
+
+## 0.5.15
+
+## 0.5.14
+
+## 0.5.13
+
+## 0.5.12
+
+## 0.5.11
+
+## 0.5.10
+
+## 0.5.9
+
+## 0.5.8
+
 ## 0.5.7
 
 ## 0.5.6

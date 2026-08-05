@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { ClientOptionGroup } from '@scalar/api-client/blocks/operation-code-sample'
+import type { ClientOptionGroup } from '@scalar/blocks/code-example'
 import type { ApiReferenceConfigurationRaw } from '@scalar/types/api-reference'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import type { AuthStore } from '@scalar/workspace-store/entities/auth'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
+import { getResolvedPathItem } from '@scalar/workspace-store/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
 import type { MergedSecuritySchemes } from '@scalar/workspace-store/request-example'
-import type { WorkspaceDocument } from '@scalar/workspace-store/schemas'
 import type {
   TraversedEntry,
   TraversedModels,
@@ -15,7 +15,10 @@ import type {
   TraversedTag,
   TraversedWebhook,
 } from '@scalar/workspace-store/schemas/navigation'
-import type { ServerObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+import type {
+  OpenApiDocument,
+  ServerObject,
+} from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 
 import Model from '@/components/Content/Models/Model.vue'
 import ModelTag from '@/components/Content/Models/ModelTag.vue'
@@ -38,7 +41,7 @@ const {
   /** Traversed entries to render */
   entries: TraversedEntry[]
   /** The document object */
-  document: WorkspaceDocument
+  document: OpenApiDocument
   /** The http client options for the dropdown */
   clientOptions: ClientOptionGroup[]
   /** The subset of the configuration object required for the operation component */
@@ -49,8 +52,10 @@ const {
     | 'layout'
     | 'orderRequiredPropertiesFirst'
     | 'orderSchemaPropertiesBy'
+    | 'expandAllSchemaProperties'
     | 'showOperationId'
     | 'hideModels'
+    | 'modelsSectionLabel'
   >
   /** Currently selected server for the document */
   selectedServer: ServerObject | null
@@ -58,6 +63,8 @@ const {
   securitySchemes: MergedSecuritySchemes
   /** Currently selected http client for the document */
   selectedClient: WorkspaceStore['workspace']['x-scalar-default-client']
+  /** Currently selected example key, shared across operations for in-sync example pickers */
+  selectedExample: WorkspaceStore['workspace']['x-scalar-default-example']
   /** Used to determine if an entry is collapsed */
   expandedItems: Record<string, boolean>
   /** The event bus for the handling all events. */
@@ -92,8 +99,8 @@ const isModel = (entry: TraversedEntry): entry is TraversedSchema =>
 
 function getPathValue(entry: TraversedOperation | TraversedWebhook) {
   return isWebhook(entry)
-    ? document.webhooks?.[entry.name]
-    : document.paths?.[entry.path]
+    ? getResolvedPathItem(document.webhooks?.[entry.name])
+    : getResolvedPathItem(document.paths?.[entry.path])
 }
 </script>
 
@@ -123,6 +130,7 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
         :pathValue="getPathValue(entry)"
         :securitySchemes="securitySchemes"
         :selectedClient="selectedClient"
+        :selectedExample="selectedExample"
         :server="selectedServer" />
     </SectionContainer>
 
@@ -133,7 +141,6 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
       "
       :eventBus
       :isCollapsed="!expandedItems[entry.id]"
-      :isLoading="false"
       :layout="options.layout"
       :moreThanOneTag="entries.filter(isTag).length > 1"
       :tag="entry">
@@ -149,26 +156,37 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
           :options
           :securitySchemes
           :selectedClient
+          :selectedExample
           :selectedServer>
         </TraversedEntry>
       </template>
     </Tag>
 
-    <!-- Display tag grop entries for modern layout (flattened) -->
-    <TraversedEntry
+    <!-- Display tag group entries for modern layout (flattened) -->
+    <!--
+      The wrapping element carries the tag group id so it remains a scroll
+      target. Modern layout flattens groups and renders no header of their own,
+      so without this anchor, selecting a tag group (from search or the sidebar)
+      would have nothing to scroll to.
+    -->
+    <div
       v-else-if="isTagGroup(entry)"
-      :authStore
-      :clientOptions
-      :document
-      :entries="entry.children || []"
-      :eventBus
-      :expandedItems
-      :level="level + 1"
-      :options
-      :securitySchemes
-      :selectedClient
-      :selectedServer>
-    </TraversedEntry>
+      :id="entry.id">
+      <TraversedEntry
+        :authStore
+        :clientOptions
+        :document
+        :entries="entry.children || []"
+        :eventBus
+        :expandedItems
+        :level="level + 1"
+        :options
+        :securitySchemes
+        :selectedClient
+        :selectedExample
+        :selectedServer>
+      </TraversedEntry>
+    </div>
 
     <!-- Models -->
     <ModelTag
@@ -176,7 +194,8 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
       :id="entry.id"
       :eventBus
       :isCollapsed="!expandedItems[entry.id]"
-      :layout="options.layout">
+      :layout="options.layout"
+      :modelsSectionLabel="options.modelsSectionLabel">
       <TraversedEntry
         :authStore
         :clientOptions
@@ -188,6 +207,7 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
         :options
         :securitySchemes
         :selectedClient
+        :selectedExample
         :selectedServer>
       </TraversedEntry>
     </ModelTag>
@@ -195,6 +215,7 @@ function getPathValue(entry: TraversedOperation | TraversedWebhook) {
     <Model
       v-else-if="isModel(entry) && document.components?.schemas?.[entry.name]"
       :id="entry.id"
+      :document
       :eventBus
       :isCollapsed="!expandedItems[entry.id]"
       :name="entry.name"

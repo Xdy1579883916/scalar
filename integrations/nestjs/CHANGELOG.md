@@ -1,5 +1,67 @@
 # @scalar/nestjs-api-reference
 
+## 1.2.12
+
+## 1.2.11
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 1.2.10
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 1.2.9
+
+## 1.2.8
+
+## 1.2.7
+
+## 1.2.6
+
+## 1.2.5
+
+## 1.2.4
+
+## 1.2.3
+
+## 1.2.2
+
+## 1.2.1
+
+## 1.2.0
+
+### Minor Changes
+
+- [#9422](https://github.com/scalar/scalar/pull/9422): Add a `nonce` option for Content Security Policy support.
+
+  When you pass a `nonce`, the rendered HTML stamps it onto the inline `<script>` and the CDN `<script>` tag (and Scalar's own `<style>` tags, plus a matching `<meta property="csp-nonce">`). This lets the API Reference run under a strict `script-src` with no `unsafe-inline` and no `unsafe-eval`.
+
+  ```ts
+  ApiReference({
+    url: '/openapi.json',
+    // Match this value in your `script-src` CSP directive.
+    nonce: 'r4nd0m',
+  })
+  ```
+
+  Note: `style-src` still needs `'unsafe-inline'`. The reference renders inline `style="…"` attributes, which a CSP nonce can never authorize (nonces only apply to `<script>`, `<style>` and `<link>` elements), so a nonce-only `style-src` is not possible. The win is a fully strict `script-src`.
+
+## 1.1.20
+
+## 1.1.19
+
+## 1.1.18
+
+## 1.1.17
+
+## 1.1.16
+
+## 1.1.15
+
 ## 1.1.14
 
 ## 1.1.13

@@ -1,5 +1,102 @@
 # @scalar/agent-chat
 
+## 0.12.23
+
+## 0.12.22
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.12.21
+
+### Patch Changes
+
+- [#9687](https://github.com/scalar/scalar/pull/9687): feat(themes): derive the border radius scale from `--scalar-radius`
+
+  The radius tokens used to be independent, so setting `--scalar-radius: 0` still left rounded corners
+  behind on anything using `--scalar-radius-lg`, `--scalar-radius-xl` or `rounded-full`. They now all
+  derive from `--scalar-radius`, which means overriding that single variable rescales every corner in the
+  interface, and `0` squares it off completely.
+
+  Two new tokens fill out the scale, `--scalar-radius-2xl` (12px) and `--scalar-radius-3xl` (16px), along
+  with `--scalar-radius-full` for pills and circles. The matching `rounded-2xl` and `rounded-3xl` Tailwind
+  utilities now emit CSS; previously they were silently dropped.
+
+  Every default value is unchanged, so nothing shifts unless you were relying on the old behaviour. If
+  your theme sets `--scalar-radius` on its own and expects the larger radii to stay put, set those tokens
+  explicitly. Override `--scalar-radius` on `:root`: a custom property substitutes `var()` at the element
+  where it is declared, so setting the base further down the tree moves it without moving anything derived
+  from it.
+
+## 0.12.20
+
+## 0.12.19
+
+## 0.12.18
+
+## 0.12.17
+
+## 0.12.16
+
+### Patch Changes
+
+- [#9653](https://github.com/scalar/scalar/pull/9653): Remove the start panel heading tag to avoid adding an extra document heading to API reference pages.
+
+## 0.12.15
+
+## 0.12.14
+
+## 0.12.13
+
+## 0.12.12
+
+## 0.12.11
+
+## 0.12.10
+
+## 0.12.9
+
+## 0.12.8
+
+## 0.12.7
+
+### Patch Changes
+
+- [#9445](https://github.com/scalar/scalar/pull/9445): Update neverpanic to 0.0.8, which drops the TypeScript peer dependency and removes the unmet peer warning on install
+
+## 0.12.6
+
+## 0.12.5
+
+## 0.12.4
+
+## 0.12.3
+
+## 0.12.2
+
+## 0.12.1
+
+## 0.12.0
+
+### Minor Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): chore: remove zod and use the custom validation library
+
+## 0.11.0
+
+### Minor Changes
+
+- [#9018](https://github.com/scalar/scalar/pull/9018): feat: make `WorkspaceDocument` an union of OpenApiDocument and AsyncApiDocument
+
+### Patch Changes
+
+- [#8844](https://github.com/scalar/scalar/pull/8844): chore: remove zod and use the custom validation library
+
 ## 0.10.15
 
 ## 0.10.14

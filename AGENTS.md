@@ -7,8 +7,8 @@ This file helps AI coding agents (Cursor, Claude Code, GitHub Copilot, etc.) wor
 Scalar is a Vue 3 + TypeScript monorepo for API documentation and testing.
 
 - It produces `@scalar/api-reference` (renders OpenAPI docs) and `@scalar/api-client` (API testing client)
-- It includes 40+ supporting packages and 18 framework integrations (Express, Fastify, Hono, NestJS, Next.js, Nuxt, etc.)
-- It uses pnpm workspaces, Turbo for build orchestration, Vite for Vue packages, and esbuild for pure TypeScript packages
+- It includes 40+ supporting packages and 15 framework integrations (Express, Fastify, Hono, NestJS, Next.js, Nuxt, etc.)
+- It uses pnpm workspaces, Turbo for build orchestration, Vite for Vue packages, and `tsc` for pure TypeScript packages
 
 - **Frontend**: Vue 3, Composition API, TypeScript
 - **Styling**: Tailwind CSS
@@ -81,9 +81,9 @@ pnpm script wait -p 5051 5052
 
 ### Workspace Layout
 
-- `packages/` - Core libraries (45 packages). Each is an npm package under `@scalar/`.
+- `packages/` - Core libraries (42 packages). Each is an npm package under `@scalar/`.
 - `integrations/` - Framework-specific wrappers (Express, Fastify, Next.js, Nuxt, etc.)
-- `projects/` - Deployable apps (`scalar-app`, `proxy-scalar-com`, `client-scalar-com`)
+- `projects/` - Deployable apps (`scalar-app`, `proxy-scalar-com`, `galaxy-scalar-com`). `scalar-app` builds both the Electron desktop app and client.scalar.com.
 - `examples/` - Usage examples for various frameworks
 - `tooling/` - Internal build scripts and changelog generator
 
@@ -192,6 +192,39 @@ If the helper you need already exists there, import it from `@scalar/helpers`. O
 - **E2E**: Playwright in `packages/api-reference` and `packages/components`
 - **Integration tests**: `pnpm vitest integrations/*`
 
+### Running Tests
+
+**Always scope test runs to the package you modified.** Do not run `pnpm test` from the repo root when working on a single package — it runs the entire monorepo test suite, which is slow, noisy, and can surface unrelated pre-existing failures that obscure real problems.
+
+**Preferred: run from repo root with a path filter (single run)**
+
+```bash
+# Run all tests for a specific package once and exit
+pnpm vitest packages/<name> --run
+
+# Examples
+pnpm vitest packages/helpers --run
+pnpm vitest packages/oas-utils --run
+pnpm vitest integrations/fastify --run
+```
+
+**Alternative: run from inside the package directory**
+
+```bash
+cd packages/<name>
+pnpm test --run   # or: pnpm vitest --run
+```
+
+**Watch mode (while actively developing)**
+
+```bash
+pnpm vitest packages/<name>          # from repo root
+# or
+cd packages/<name> && pnpm test      # from package directory
+```
+
+Only use the root `pnpm test` (no path argument) when you intentionally want to verify the full monorepo — for example, as a final pre-merge sanity check.
+
 ### Testing Standards
 
 - Always import `describe`, `it`, and `expect` explicitly from `vitest` (no globals)
@@ -296,7 +329,7 @@ If both a Linear ticket and a GitHub issue are provided, include both.
 
 ### Changesets
 
-For code changes in `packages/*` and `integrations/*`, include a changeset using `patch` or `minor` (do not use `major`).
+For code changes in `packages/*`, `integrations/*`, and `projects/*`, include a changeset using `patch` or `minor` (do not use `major`).
 
 Before opening or updating a PR, run:
 
@@ -327,7 +360,19 @@ pnpm biome check --write --diagnostic-level=error --no-errors-on-unmatched --fil
 pnpm prettier --write $CHANGED
 ```
 
-**2. Type-check only the affected package(s):**
+**2. Run tests only for the affected package(s):**
+
+```bash
+# Replace <package-name> with the actual package directory name (e.g. helpers, oas-utils, api-client)
+pnpm vitest packages/<package-name> --run
+
+# For integrations
+pnpm vitest integrations/<integration-name> --run
+```
+
+Do not run `pnpm test` from the repo root — scope it to the package you changed.
+
+**3. Type-check only the affected package(s):**
 
 ```bash
 # Replace <package-name> with the actual package (e.g. api-client, helpers, oas-utils)
@@ -459,4 +504,4 @@ Use consistent terminology:
 ## Further Reading
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - PR requirements, changesets, auto-generated files
-- [.cursor/rules/cloud-agents-starter-skill.mdc](./.cursor/rules/cloud-agents-starter-skill.mdc) - Runbook for CI parity and test servers
+- [.agents/skills/cloud-agents-starter/SKILL.md](./.agents/skills/cloud-agents-starter/SKILL.md) - Runbook for CI parity and test servers

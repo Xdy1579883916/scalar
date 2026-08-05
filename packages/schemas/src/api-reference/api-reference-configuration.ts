@@ -1,4 +1,7 @@
+import { DEFAULT_MODELS_SECTION_LABEL } from '@scalar/types/api-reference'
+import type { AvailableClient, ClientId, TargetId } from '@scalar/types/snippetz'
 import {
+  type LiteralSchema,
   any,
   array,
   boolean,
@@ -29,23 +32,44 @@ export const apiReferenceConfigurationSchema = intersection([
       typeComment: '@deprecated Use proxyUrl instead',
     }),
     fetch: optional(fn<typeof fetch>(), {
-      typeComment: 'Custom fetch function for custom logic. Can be used to add custom headers, handle auth, etc.',
+      typeComment: '@deprecated Use `customFetch` instead.',
+    }),
+    customFetch: optional(fn<typeof fetch>(), {
+      typeComment:
+        "Custom fetch function used both when loading the OpenAPI document and when sending requests from the API client. Can be used to add custom headers, attach credentials (for example `credentials: 'include'`), handle auth, etc.",
     }),
     plugins: optional(array(apiReferencePluginSchema), {
       typeComment: 'Plugins for the API reference',
+    }),
+    pluginUrls: optional(array(string()), {
+      typeComment:
+        'URLs of ESM modules that provide additional plugins for the API reference. Each module is loaded with a dynamic `import()` before the API reference mounts, and its default export is registered as a plugin. Unlike `plugins`, this option is JSON-serializable, so integrations that pass their configuration as JSON can load plugins without replacing the whole bundle. Only supported by the standalone browser build (`Scalar.createApiReference`).',
     }),
     isEditable: boolean({
       default: false,
       typeComment: 'Allows the user to inject an editor for the spec',
     }),
-    isLoading: boolean({
-      default: false,
-      typeComment: 'Controls whether the references show a loading state in the intro',
-    }),
     hideModels: boolean({
       default: false,
       typeComment: 'Whether to show models in the sidebar, search, and content.',
     }),
+    modelsSectionLabel: optional(union([literal('Models'), literal('Schemas'), string()]), {
+      typeComment:
+        'Label for the components.schemas section in the sidebar, content, and search. Use `Schemas` for OpenAPI terminology.',
+    }),
+    localization: optional(
+      object({
+        locale: optional(string()),
+        // `auto` is listed first so that coerce falls back to it for invalid input,
+        // matching the `.catch('auto')` behavior of the Zod schema in @scalar/types.
+        direction: optional(union([literal('auto'), literal('ltr'), literal('rtl')])),
+        translations: optional(record(string(), any())),
+      }),
+      {
+        typeComment:
+          'API Reference UI localization. Select a built-in locale, override labels, and control LTR/RTL rendering.',
+      },
+    ),
     documentDownloadType: union(
       [literal('both'), literal('yaml'), literal('json'), literal('direct'), literal('none')],
       {
@@ -85,7 +109,14 @@ export const apiReferenceConfigurationSchema = intersection([
       typeComment: 'Path to a favicon image',
     }),
     hiddenClients: optional(
-      union([record(string(), union([boolean(), array(string())])), array(string()), literal(true)]),
+      // The client/target names stay permissive strings at runtime, so `coerce` leaves unknown
+      // values untouched (a real union would rewrite them to the first literal). The casts only
+      // tighten the type so config authors get autocomplete on the known ids.
+      union([
+        record(string(), union([boolean(), array(string() as unknown as LiteralSchema<ClientId<TargetId>>)])),
+        array(string() as unknown as LiteralSchema<TargetId | ClientId<TargetId> | AvailableClient>),
+        literal(true),
+      ]),
       {
         typeComment:
           'List of httpsnippet clients to hide from the clients menu. By default hides Unirest, pass `[]` to show all clients',
@@ -102,9 +133,6 @@ export const apiReferenceConfigurationSchema = intersection([
     ),
     customCss: optional(string(), {
       typeComment: 'Custom CSS to be added to the page',
-    }),
-    onSpecUpdate: optional(fn<(input: string) => void>(), {
-      typeComment: 'onSpecUpdate is fired on spec/swagger content change',
     }),
     onServerChange: optional(fn<(input: string) => void>(), {
       typeComment: 'onServerChange is fired on selected server change',
@@ -126,6 +154,19 @@ export const apiReferenceConfigurationSchema = intersection([
       {
         typeComment:
           'Fired before the outbound request is built; callback receives a mutable request builder. Experimental API.',
+      },
+    ),
+    onRequestBuilt: optional(
+      fn<
+        (input: {
+          request: Request
+          requestBuilder: unknown
+          envVariables: Record<string, string>
+        }) => Promise<void> | void
+      >(),
+      {
+        typeComment:
+          'Fired right before the outbound request is sent; callback receives the exact fetch Request that goes over the wire. Experimental API.',
       },
     ),
     onShowMore: optional(fn<(tagId: string) => Promise<void> | void>(), {
@@ -177,6 +218,9 @@ export const apiReferenceConfigurationSchema = intersection([
     generateWebhookSlug: optional(fn<(input: { name: string; method?: string }) => string>(), {
       typeComment: 'Customize the webhook portion of the hash',
     }),
+    setPageTitle: optional(fn<(input: { title: string; document: { title: string; slug: string } }) => string>(), {
+      typeComment: 'Customize the browser tab title for the section currently in view',
+    }),
     redirect: optional(fn<(input: string) => string | null | undefined>(), {
       typeComment:
         'To handle redirects, pass a function that receives the current path/hash and passes that to history.replaceState',
@@ -202,6 +246,11 @@ export const apiReferenceConfigurationSchema = intersection([
       default: false,
       typeComment:
         'Whether to expand all responses by default. Warning: this can cause performance issues on big documents',
+    }),
+    expandAllSchemaProperties: boolean({
+      default: false,
+      typeComment:
+        'Whether to expand all nested schema properties by default. The Show/Hide Child Attributes toggle remains available so nested sections can still be collapsed manually. Warning: this can cause performance issues on big documents',
     }),
     tagsSorter: optional(union([literal('alpha'), fn<(a: any, b: any) => number>()]), {
       typeComment: 'Function to sort tags',
@@ -261,6 +310,16 @@ export const apiReferenceConfigurationWithSourceSchema = (rawInput: unknown) => 
     delete input.proxy
   }
 
+  if (input.fetch) {
+    console.warn(`[DEPRECATED] You're using the deprecated 'fetch' attribute. Use 'customFetch' instead.`)
+
+    if (!input.customFetch) {
+      input.customFetch = input.fetch
+    }
+
+    delete input.fetch
+  }
+
   if (input.proxyUrl === OLD_PROXY_URL) {
     console.warn(`[DEPRECATED] Warning: configuration.proxyUrl points to our old proxy (${OLD_PROXY_URL}).`)
     console.warn(`[DEPRECATED] We are overwriting the value and use the new proxy URL (${NEW_PROXY_URL}) instead.`)
@@ -279,6 +338,8 @@ export const apiReferenceConfigurationWithSourceSchema = (rawInput: unknown) => 
     // @ts-expect-error - We're deleting the deprecated attribute
     delete input.showToolbar
   }
+
+  input.modelsSectionLabel ??= DEFAULT_MODELS_SECTION_LABEL
 
   return input
 }

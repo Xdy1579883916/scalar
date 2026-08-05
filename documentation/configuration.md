@@ -302,6 +302,8 @@ To make authentication easier you can prefill the credentials for your users:
             tokenUrl: 'https://auth.example.com/oauth2/token',
             'x-scalar-redirect-uri': 'https://your-app.com/callback',
             // Use PKCE for additional security: 'SHA-256', 'plain', or 'no'
+            // With 'SHA-256' or 'plain', authorizationCode is treated as a public client.
+            // The Client Secret field is hidden and client_secret is not sent in token/refresh requests.
             'x-usePkce': 'SHA-256',
             // Preselected scopes
             selectedScopes: ['profile', 'email'],
@@ -362,6 +364,8 @@ To make authentication easier you can prefill the credentials for your users:
   }
 }
 ```
+
+For OAuth2 `authorizationCode` flows, when `x-usePkce` is set to `'SHA-256'` or `'plain'`, Scalar treats the flow as a public PKCE client. In that mode, the Client Secret input is hidden in the authentication form, and `client_secret` is not included in token exchange or refresh requests.
 
 The `authentication` configuration accepts:
 
@@ -537,6 +541,25 @@ By default response sections are closed in the operations. This flag will open t
 }
 ```
 
+
+#### expandAllSchemaProperties
+
+**Type:** `boolean`
+
+When true, nested child properties are expanded by default. The
+"Show/Hide Child Attributes" toggle stays available so users can collapse
+sections manually.
+
+Warning: this can cause performance issues on big documents.
+
+**Default:** `false`
+
+```javascript
+{
+  expandAllSchemaProperties: true
+}
+```
+
 #### favicon
 
 **Type:** `string`
@@ -616,6 +639,36 @@ Whether models (`components.schemas` or `definitions`) should be shown in the si
 ```javascript
 {
   hideModels: true
+}
+```
+
+#### modelsSectionLabel
+
+**Type:** `'Models' | 'Schemas' | string`
+
+Label for the `components.schemas` section in the sidebar, main content, and search. Use `Schemas` for OpenAPI terminology; `Models` is the default for backward compatibility. Any custom string is supported.
+
+**Default:** `'Models'`
+
+```javascript
+{
+  modelsSectionLabel: 'Schemas'
+}
+```
+
+#### localization
+
+**Type:** `{ locale?: string, direction?: 'ltr' | 'rtl' | 'auto', translations?: object }`
+
+Localizes the API Reference UI and controls text direction (LTR/RTL). See the dedicated
+[Localization](localization.md) page for the full reference, including the built-in locales and how
+to override individual labels.
+
+```javascript
+{
+  localization: {
+    locale: 'de',
+  },
 }
 ```
 
@@ -751,20 +804,6 @@ and each **value** specifies the visibility behavior for the clients of that lan
     js: true,
     shell: ['httpie'], // show all except `httpie`
   },
-}
-```
-
-#### isLoading
-
-**Type:** `boolean`
-
-Controls whether the references show a loading state in the intro section. Useful when you want to indicate that content is being loaded.
-
-**Default:** `false`
-
-```javascript
-{
-  isLoading: true
 }
 ```
 
@@ -944,6 +983,20 @@ Pass an array of custom plugins that you want. [Read more about plugins here.](p
 }
 ```
 
+#### pluginUrls
+
+**Type:** `string[]`
+
+Pass URLs of ESM modules that export a plugin as their default export. The modules are imported before the API reference mounts and their default exports are registered alongside the plugins passed via `plugins`. Unlike `plugins`, this option is JSON-serializable, so it also works in integrations that pass their configuration as JSON. Only supported by the standalone browser build (`Scalar.createApiReference`). [Read more about plugins here.](plugins.md)
+
+```javascript
+{
+  pluginUrls: [
+    'https://cdn.jsdelivr.net/npm/@example/scalar-plugin/dist/plugin.js',
+  ],
+}
+```
+
 #### proxyUrl
 
 **Type:** `string`
@@ -1098,19 +1151,21 @@ By default we're using Inter and JetBrains Mono, served from our fonts CDN at `h
 
 Custom functions to control specific behaviors and URL generation.
 
-#### fetch
+#### customFetch
 
 **Type:** `(input: string | URL | globalThis.Request, init?: RequestInit) => Promise<Response>`
 
-Custom [fetch function](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) to fetch documents with a custom logic. Can be used to add custom headers, handle auth, etc.
+Custom [fetch function](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) used both when loading the OpenAPI document and when sending "Test Request" calls from the API client. Can be used to add custom headers, attach credentials (for example `credentials: 'include'`), handle auth, etc.
 
 ```javascript
 {
-  fetch: (input: string | URL | globalThis.Request, init?: RequestInit) => {
-    return window.fetch(input, init)
+  customFetch: (input: string | URL | globalThis.Request, init?: RequestInit) => {
+    return window.fetch(input, { ...init, credentials: 'include' })
   }
 }
 ```
+
+> The previous `fetch` option is deprecated. It still works and is migrated automatically (with a console warning), but new code should use `customFetch`.
 
 #### generateHeadingSlug
 
@@ -1214,6 +1269,21 @@ Customize how webhook URLs are generated. This function receives the webhook obj
 }
 ```
 
+#### setPageTitle
+
+**Type:** `(input: { title: string; document: { title: string; slug: string } }) => string`
+
+Customize the browser tab title. The function is called whenever the section in view changes — on sidebar clicks, on scroll, and when switching documents — and receives the title of the section currently in view together with the active OpenAPI document.
+
+> Note: This must be passed through JavaScript, setting a data attribute will not work.
+
+```js
+// Results in a title like: Scalar Galaxy – Create a user
+{
+  setPageTitle: ({ title, document }) => `${document.title} – ${title}`
+}
+```
+
 #### tagsSorter
 
 **Type:** `'alpha' | (a: Tag, b: Tag) => number`
@@ -1297,6 +1367,8 @@ Callback fired before the outbound request is sent from the embedded API client.
 > **Experimental:** `RequestFactory` may change in minor releases; treat its fields as unstable until the API stabilizes.
 
 **`request`** is a fetch API [`Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) built from the builder for backward compatibility. Using it as the primary way to customize outbound traffic is going to be **deprecated**; prefer **`requestBuilder`**. The API Reference passes both `request` and `requestBuilder` to this callback.
+
+> Note: The `request` here is **not** the object that is sent over the wire; the actual request is rebuilt from `requestBuilder` after this callback runs. If you need the exact outgoing request (for example, to hash a `multipart/form-data` body for request signing), use [`onRequestBuilt`](#onrequestbuilt) instead.
 
 ```javascript
 {
@@ -1427,6 +1499,32 @@ Callback that triggers as soon as the references are lazy loaded.
 }
 ```
 
+#### onRequestBuilt
+
+**Type:** `({ request: Request; requestBuilder: RequestFactory; envVariables: Record<string, string> }) => void | Promise<void>`
+
+Callback fired after the outbound fetch [`Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) has been built, right before it is sent from the embedded API client. The `request` is the **exact object handed to fetch**: mutating its headers modifies the outgoing request, and hashing its body produces a hash that matches what the server receives.
+
+This makes it the right hook for request signing. A request rebuilt from the builder would not work for `multipart/form-data` bodies, because every rebuild generates a fresh random multipart boundary.
+
+Use [`onBeforeRequest`](#onbeforerequest) instead when you need to mutate the request builder (method, path, query, body, security); those mutations have no effect in `onRequestBuilt` because the request is already built.
+
+> **Experimental:** This API may change in minor releases.
+
+```javascript
+{
+  onRequestBuilt: async ({ request }) => {
+    // Hash the exact body bytes that are sent over the wire
+    const bodyBytes = await request.clone().arrayBuffer()
+    const digest = await crypto.subtle.digest('SHA-256', bodyBytes)
+    const bodyHashB64 = btoa(String.fromCharCode(...new Uint8Array(digest)))
+
+    // Header mutations apply to the outgoing request
+    request.headers.set('X-Body-Hash', bodyHashB64)
+  }
+}
+```
+
 #### onRequestSent
 
 **Type:** `(request: string) => void`
@@ -1479,20 +1577,6 @@ Callback function that is triggered when a user clicks on any item in the sideba
 {
   onSidebarClick: (href) => {
     console.log('Sidebar item clicked:', href)
-  }
-}
-```
-
-#### onSpecUpdate
-
-**Type:** `(spec: string) => void`
-
-You can listen to changes with onSpecUpdate that runs on spec/swagger content change.
-
-```javascript
-{
-  onSpecUpdate: (value: string) => {
-    console.log('Content updated:', value)
   }
 }
 ```

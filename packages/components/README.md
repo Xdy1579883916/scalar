@@ -13,6 +13,19 @@
 
 Scalar Components provides a library of components used across Scalar products. The library is designed to work seamlessly with our [theming system](https://github.com/scalar/scalar/tree/main/packages/themes) and includes a scoped copy of the themes reset, base variables and colors.
 
+---
+
+Scalar is an open-source API platform for teams who want beautiful developer interfaces without vendor lock-in.
+
+- **[API References](https://scalar.com/products/api-references/getting-started)** — Interactive API documentation from OpenAPI and AsyncAPI specs.
+- **[Developer Docs](https://scalar.com/products/docs/getting-started)** — Write in Markdown/MDX, generate API references, sync with two-way Git.
+- **[SDK Generator](https://scalar.com/products/sdk-generator/getting-started)** — Type-safe SDKs and CLIs in TypeScript, Python, Go, PHP, Java, and Ruby.
+- **[API Client](https://scalar.com/products/api-client/getting-started)** — Open-source, offline-first Postman alternative built on OpenAPI.
+
+20M+ monthly npm installs · 15,500+ GitHub stars · MIT licensed · [scalar.com](https://scalar.com)
+
+---
+
 <!-- Hide the storybook link on Storybook -->
 <div class="sb-hide">
 
@@ -50,7 +63,7 @@ Then, you can use the components in your Vue components. For example:
 <script
   setup
   lang="ts">
-  import { ScalarButton } from '@scalar/components'
+  import { ScalarButton } from '@scalar/components/button'
 </script>
 <template>
   <ScalarButton />
@@ -118,7 +131,7 @@ All pull requests should include the following checklist:
 ```md
 ## Component Checklist
 
-- [ ] Exported from `@scalar/components`
+- [ ] Exported from its subpath (e.g. `@scalar/components/example`) via `package.json` `exports` — not the barrel
 - [ ] Has JSDocs for all:
   - [ ] Components (with examples)
   - [ ] Props

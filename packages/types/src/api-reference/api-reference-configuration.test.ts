@@ -24,6 +24,15 @@ describe('api-reference-configuration', () => {
         isEditable: true,
         showSidebar: true,
         hideModels: false,
+        localization: {
+          locale: 'es',
+          direction: 'auto',
+          translations: {
+            search: {
+              label: 'Buscar',
+            },
+          },
+        },
         hideTestRequestButton: false,
         documentDownloadType: 'both',
         hideSearch: false,
@@ -65,6 +74,22 @@ describe('api-reference-configuration', () => {
       const config = { hiddenClients: true }
 
       expect(apiReferenceConfigurationSchema.parse(config)).toMatchObject({ hiddenClients: true })
+    })
+
+    it('validates localization configuration', () => {
+      const config = {
+        localization: {
+          locale: 'ar',
+          direction: 'rtl',
+          translations: {
+            operation: {
+              testRequest: 'اختبار الطلب',
+            },
+          },
+        },
+      }
+
+      expect(apiReferenceConfigurationSchema.parse(config)).toMatchObject(config)
     })
 
     it('validates theme enum values', () => {
@@ -131,7 +156,6 @@ describe('api-reference-configuration', () => {
         generateOperationSlug: (operation: { path: string; method: string }) => `${operation.method}-${operation.path}`,
         generateWebhookSlug: (webhook: { name: string }) => `webhook-${webhook.name}`,
         onLoaded: () => console.log('loaded'),
-        onSpecUpdate: (spec: string) => console.log('spec updated', spec),
       }
 
       expect(() => apiReferenceConfigurationSchema.parse(config)).not.toThrow()
@@ -414,6 +438,20 @@ describe('api-reference-configuration', () => {
       const migratedConfig = apiReferenceConfigurationSchema.parse(config)
 
       expect(migratedConfig.onSidebarClick?.('a')).toBeInstanceOf(Promise)
+    })
+
+    it('uses custom setPageTitle', () => {
+      const config = {
+        setPageTitle: ({ title, document }) => `${document.title} | ${title}`,
+      } satisfies Partial<ApiReferenceConfiguration>
+      const migratedConfig = apiReferenceConfigurationSchema.parse(config)
+
+      const result = migratedConfig.setPageTitle?.({
+        title: 'Authentication',
+        document: { title: 'My API', slug: 'my-api' },
+      })
+
+      expect(result).toBe('My API | Authentication')
     })
   })
 })

@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { getResolvedRefDeep } from '@scalar/api-client/blocks/operation-code-sample'
-import { ScalarCodeBlock, ScalarVirtualText } from '@scalar/components'
+import { getResolvedRefDeep } from '@scalar/blocks/code-example'
+import { ScalarCodeBlock } from '@scalar/components/code-block'
+import { ScalarVirtualCodeBlock } from '@scalar/components/virtual-code-block'
 import { prettyPrintJson } from '@scalar/helpers/json/pretty-print-json'
 import { getExampleFromSchema } from '@scalar/workspace-store/request-example'
 import type {
@@ -10,10 +11,13 @@ import type {
 } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed } from 'vue'
 
+import { useLocalization } from '@/features/localization'
+
 const { example, response } = defineProps<{
   response: MediaTypeObject | undefined
   example: ExampleObject | undefined
 }>()
+const { translate } = useLocalization()
 
 /** Get content from the appropriate source */
 const getContent = () => {
@@ -62,17 +66,16 @@ const shouldVirtualize = computed(() => {
     lang="json"
     :prettyPrintedContent="prettyPrintedContent" />
 
-  <ScalarVirtualText
+  <ScalarVirtualCodeBlock
     v-else-if="prettyPrintedContent !== undefined && shouldVirtualize"
-    containerClass="custom-scroll scalar-code-block border rounded-b flex flex-1 max-h-screen"
-    contentClass="language-plaintext whitespace-pre font-code text-base p-2"
-    :lineHeight="20"
-    :text="prettyPrintedContent" />
+    class="bg-b-2"
+    :content="prettyPrintedContent"
+    lang="json" />
 
   <div
     v-else
     class="empty-state">
-    No Body
+    {{ translate('response.noBody') }}
   </div>
 </template>
 

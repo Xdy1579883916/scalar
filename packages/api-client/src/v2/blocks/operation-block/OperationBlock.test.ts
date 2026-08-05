@@ -1,4 +1,9 @@
+import { createHash } from 'node:crypto'
+
 import { ERRORS } from '@scalar/helpers/errors/normalize-error'
+import { buildSafeBodyRequest } from '@scalar/helpers/http/can-method-have-body'
+import { err, ok } from '@scalar/helpers/types/result'
+import { type ClientPlugin, executeHook } from '@scalar/oas-utils/helpers'
 import { AVAILABLE_CLIENTS } from '@scalar/types/snippetz'
 import type { AuthMeta, WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { type RequestPayload, buildRequest, requestFactory } from '@scalar/workspace-store/request-example'
@@ -9,6 +14,7 @@ import type { OperationObject } from '@scalar/workspace-store/schemas/v3.1/stric
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { createMockEventBus } from '@/v2/helpers/test-utils'
 import type { ClientLayout } from '@/v2/types/layout'
 
 import { responseCache } from './helpers/response-cache'
@@ -26,9 +32,14 @@ vi.mock('@scalar/workspace-store/request-example', async (importOriginal) => {
 
 vi.mock('./helpers/send-request')
 
-vi.mock('@scalar/oas-utils/helpers', () => ({
-  executeHook: vi.fn(async (payload: unknown) => payload),
-}))
+vi.mock('@scalar/oas-utils/helpers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@scalar/oas-utils/helpers')>()
+  return {
+    ...actual,
+    // Wrap the real implementation so plugin hooks run while calls remain inspectable
+    executeHook: vi.fn(actual.executeHook),
+  }
+})
 
 /**
  * Mock the toast composable to capture toast calls in tests.
@@ -80,18 +91,6 @@ vi.mock('@/components/ViewLayout/ViewLayoutContent.vue', () => ({
     template: '<div data-test="view-layout-content"><slot /></div>',
   },
 }))
-
-/**
- * Creates a minimal mock event bus for testing.
- * We only implement the methods that OperationBlock uses.
- */
-const createMockEventBus = (): WorkspaceEventBus => ({
-  on: vi.fn(),
-  once: vi.fn(),
-  off: vi.fn(),
-  emit: vi.fn(() => null),
-  flushDebouncedEmits: vi.fn(),
-})
 
 /**
  * Creates a minimal mock environment for testing.
@@ -225,11 +224,13 @@ describe('OperationBlock', () => {
       }),
     }))
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
   })
 
   afterEach(() => {
@@ -312,7 +313,71 @@ describe('OperationBlock', () => {
     expect(sendRequest).toHaveBeenCalledWith({
       isUsingProxy: false,
       requestPayload: ['https://api.example.com/api/users', expect.objectContaining({ method: 'GET' })],
+      request: expect.any(Request),
       plugins: [],
+    })
+  })
+
+  it('forwards server and customFetch to beforeRequest plugins', async () => {
+    const server = { url: 'https://api.example.com' }
+    const customFetch = vi.fn<typeof fetch>()
+    const received = vi.fn()
+    const plugin: ClientPlugin = {
+      hooks: {
+        beforeRequest: ({ server, customFetch }) => {
+          received({ server, customFetch })
+        },
+      },
+    }
+
+    const wrapper = mount(OperationBlock, {
+      props: {
+        ...createDefaultProps(),
+        server,
+        options: { customFetch },
+        plugins: [plugin],
+      },
+    })
+
+    await triggerExecute(wrapper)
+
+    expect(received).toHaveBeenCalledOnce()
+    expect(received).toHaveBeenCalledWith({ server, customFetch })
+  })
+
+  it('persists server-set cookies into the document jar after a response', async () => {
+    const mockEventBus = createMockEventBus()
+    const mockResponse = {
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      cookieHeaderKeys: ['csrftoken=abc123; Path=/; SameSite=Lax'],
+      duration: 100,
+      method: 'get',
+      path: '/api/users',
+      data: '{}',
+      size: 2,
+    } as unknown as ResponseInstance
+
+    vi.mocked(sendRequest).mockResolvedValue([
+      null,
+      {
+        timestamp: Date.now(),
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        response: mockResponse,
+        originalResponse: createMockOriginalResponse(),
+      },
+    ])
+
+    const wrapper = mount(OperationBlock, {
+      props: { ...createDefaultProps(), eventBus: mockEventBus },
+    })
+
+    await triggerExecute(wrapper)
+
+    expect(mockEventBus.emit).toHaveBeenCalledWith('cookie:upsert:cookie', {
+      collectionType: 'document',
+      payload: { name: 'csrftoken', value: 'abc123', domain: 'api.example.com', path: '/' },
     })
   })
 
@@ -440,11 +505,45 @@ describe('OperationBlock', () => {
     expect(sendRequest).toHaveBeenCalledOnce()
   })
 
-  it('displays toast error when buildRequest fails', async () => {
-    const mockError = new Error('Invalid URL')
-    vi.mocked(buildRequest).mockImplementation(() => {
-      throw mockError
+  it('displays toast error when buildRequest returns a failure result', async () => {
+    vi.mocked(buildRequest).mockReturnValue(
+      err(
+        'MISSING_REQUEST_SERVER_BASE',
+        'No server URL is configured for this request. Add a servers entry to your OpenAPI document (or set a server in the client) before sending.',
+      ),
+    )
+
+    const wrapper = mount(OperationBlock, {
+      props: createDefaultProps(),
     })
+
+    await triggerExecute(wrapper)
+
+    expect(mockToast).toHaveBeenCalledWith(
+      'No server URL is configured for this request. Add a servers entry to your OpenAPI document (or set a server in the client) before sending.',
+      'error',
+    )
+    expect(sendRequest).not.toHaveBeenCalled()
+  })
+
+  it('passes allowMissingRequestServerBase true when layout is modal', async () => {
+    const wrapper = mount(OperationBlock, {
+      props: { ...createDefaultProps(), layout: 'modal' },
+    })
+
+    await triggerExecute(wrapper)
+
+    expect(buildRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        envVariables: {},
+        allowMissingRequestServerBase: true,
+      }),
+    )
+  })
+
+  it('displays toast error when buildRequest returns BUILD_REQUEST_FAILED', async () => {
+    vi.mocked(buildRequest).mockReturnValue(err('BUILD_REQUEST_FAILED' as const, 'Invalid URL'))
 
     const wrapper = mount(OperationBlock, {
       props: createDefaultProps(),
@@ -459,11 +558,13 @@ describe('OperationBlock', () => {
   it('displays toast error when sendRequest fails', async () => {
     const mockController = new AbortController()
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     const mockError = new Error(ERRORS.REQUEST_FAILED)
     vi.mocked(sendRequest).mockResolvedValue([mockError, null])
@@ -482,11 +583,13 @@ describe('OperationBlock', () => {
     const mockController = new AbortController()
     const abortSpy = vi.spyOn(mockController, 'abort')
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -515,11 +618,13 @@ describe('OperationBlock', () => {
   it('passes props to requestFactory and buildRequest', async () => {
     const mockController = new AbortController()
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -568,6 +673,7 @@ describe('OperationBlock', () => {
       }),
       {
         envVariables: {},
+        allowMissingRequestServerBase: false,
       },
     )
   })
@@ -581,14 +687,16 @@ describe('OperationBlock', () => {
       }),
     })
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: [
-        'https://proxy.example.com/?scalar_url=https%3A%2F%2Fapi.example.com%2Fapi%2Fusers',
-        { method: 'GET', headers: new Headers() },
-      ],
-      isUsingProxy: true,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: [
+          'https://proxy.example.com/?scalar_url=https%3A%2F%2Fapi.example.com%2Fapi%2Fusers',
+          { method: 'GET', headers: new Headers() },
+        ],
+        isUsingProxy: true,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -612,18 +720,104 @@ describe('OperationBlock', () => {
     expect(sendRequest).toHaveBeenCalledWith({
       isUsingProxy: true,
       requestPayload: [expect.any(String), expect.any(Object)],
+      request: expect.any(Request),
       plugins: [],
     })
+  })
+
+  it('passes the exact Request observed by the requestBuilt hook to sendRequest', async () => {
+    vi.mocked(sendRequest).mockResolvedValue([
+      null,
+      {
+        timestamp: Date.now(),
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        response: {} as ResponseInstance,
+        originalResponse: createMockOriginalResponse(),
+      },
+    ])
+
+    const wrapper = mount(OperationBlock, {
+      props: createDefaultProps(),
+    })
+
+    await triggerExecute(wrapper)
+
+    const requestBuiltCall = vi.mocked(executeHook).mock.calls.find((call) => call[1] === 'requestBuilt')
+    expect(requestBuiltCall).toBeDefined()
+
+    const hookRequest = (requestBuiltCall?.[0] as { request: Request }).request
+    expect(hookRequest).toBeInstanceOf(Request)
+
+    // The hook and the fetch call must observe the same Request instance, so header
+    // mutations apply and body hashes match what goes over the wire
+    const sendRequestCall = vi.mocked(sendRequest).mock.calls.at(-1)?.[0]
+    expect(sendRequestCall?.request).toBe(hookRequest)
+  })
+
+  it('multipart body hash computed in the requestBuilt hook matches the request that is sent', async () => {
+    const sha256Base64 = async (request: Request): Promise<string> => {
+      const bytes = new Uint8Array(await request.clone().arrayBuffer())
+      return createHash('sha256').update(bytes).digest('base64')
+    }
+
+    const formData = new FormData()
+    formData.append('field', 'value')
+
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: new AbortController(),
+        requestPayload: ['https://api.example.com/upload', { method: 'POST', body: formData }],
+        isUsingProxy: false,
+      }),
+    )
+
+    vi.mocked(sendRequest).mockResolvedValue([
+      null,
+      {
+        timestamp: Date.now(),
+        requestPayload: ['https://api.example.com/upload', { method: 'POST' }],
+        response: {} as ResponseInstance,
+        originalResponse: createMockOriginalResponse(),
+      },
+    ])
+
+    let hookHash: string | undefined
+    const signingPlugin: ClientPlugin = {
+      hooks: {
+        requestBuilt: async ({ request }) => {
+          hookHash = await sha256Base64(request)
+        },
+      },
+    }
+
+    const wrapper = mount(OperationBlock, {
+      props: { ...createDefaultProps(), plugins: [signingPlugin] },
+    })
+
+    await triggerExecute(wrapper)
+
+    expect(hookHash).toBeDefined()
+
+    const sentRequest = vi.mocked(sendRequest).mock.calls.at(-1)?.[0].request
+    expect(sentRequest).toBeInstanceOf(Request)
+    expect(await sha256Base64(sentRequest as Request)).toBe(hookHash)
+
+    // Guards the regression this feature fixes: rebuilding from the same FormData
+    // generates a fresh random multipart boundary, so a rebuilt request hashes differently
+    const rebuiltRequest = buildSafeBodyRequest('https://api.example.com/upload', { method: 'POST', body: formData })
+    expect(await sha256Base64(rebuiltRequest)).not.toBe(hookHash)
   })
 
   it('stores response after successful request execution', async () => {
     const mockController = new AbortController()
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     const mockResponse: ResponseInstance = {
       status: 200,
@@ -699,11 +893,13 @@ describe('OperationBlock', () => {
       bytes: vi.fn(),
     }
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -758,11 +954,13 @@ describe('OperationBlock', () => {
       bytes: vi.fn(),
     }
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -817,11 +1015,13 @@ describe('OperationBlock', () => {
       bytes: vi.fn(),
     }
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -876,11 +1076,13 @@ describe('OperationBlock', () => {
       bytes: vi.fn(),
     }
 
-    vi.mocked(buildRequest).mockReturnValue({
-      controller: mockController,
-      requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
-      isUsingProxy: false,
-    })
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: mockController,
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
 
     vi.mocked(sendRequest).mockResolvedValue([
       null,
@@ -914,5 +1116,197 @@ describe('OperationBlock', () => {
     expect(restored).not.toBeNull()
     expect(restored && 'data' in restored ? restored.data : undefined).toBe('{"users": []}')
     expect(getResponseBlockProps(wrapper).requestPayload).not.toBeNull()
+  })
+
+  it('only falls back to history entries that were created for the active example', async () => {
+    // Two history entries on the same path/method but for different
+    // example keys. The active example is `default`, so the response panel
+    // must show the `default` entry — not the most recent overall.
+    const buildEntry = (exampleKey: string, body: string, status: number) => ({
+      time: 100,
+      timestamp: Date.now(),
+      request: {
+        method: 'GET',
+        url: 'https://api.example.com/api/users',
+        httpVersion: 'HTTP/1.1',
+        headers: [],
+        queryString: [],
+        cookies: [],
+        headersSize: -1,
+        bodySize: -1,
+      },
+      response: {
+        status,
+        statusText: 'OK',
+        httpVersion: 'HTTP/1.1',
+        headers: [],
+        cookies: [],
+        content: { size: body.length, mimeType: 'application/json', text: body },
+        redirectURL: '',
+        headersSize: -1,
+        bodySize: body.length,
+      },
+      meta: { example: exampleKey },
+      requestMetadata: { variables: {} },
+    })
+
+    const wrapper = mount(OperationBlock, {
+      props: {
+        ...createDefaultProps(),
+        // Chronological order: `default` first, then `alternative` newer.
+        history: [
+          buildEntry('default', '{"from":"default"}', 200),
+          buildEntry('alternative', '{"from":"alternative"}', 201),
+        ],
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+
+    const restored = getResponseBlockProps(wrapper).response
+    expect(restored?.status).toBe(200)
+    expect(restored && 'data' in restored ? restored.data : undefined).toBe('{"from":"default"}')
+  })
+
+  it('falls back to the last history entry when the in-memory cache is empty', async () => {
+    // Simulates landing on an operation that has been called before in a
+    // previous session: `responseCache` is empty but the workspace store
+    // still holds the operation's history. The response panel should show
+    // the most recent historical response instead of an empty state.
+    const historyEntry = {
+      time: 250,
+      timestamp: Date.now(),
+      request: {
+        method: 'GET',
+        url: 'https://api.example.com/api/users',
+        httpVersion: 'HTTP/1.1',
+        headers: [],
+        queryString: [],
+        cookies: [],
+        headersSize: -1,
+        bodySize: -1,
+      },
+      response: {
+        status: 201,
+        statusText: 'Created',
+        httpVersion: 'HTTP/1.1',
+        headers: [{ name: 'Content-Type', value: 'application/json' }],
+        cookies: [],
+        content: {
+          size: 19,
+          mimeType: 'application/json',
+          text: '{"from":"history"}',
+        },
+        redirectURL: '',
+        headersSize: -1,
+        bodySize: 19,
+      },
+      meta: { example: 'default' },
+      requestMetadata: { variables: {} },
+    }
+
+    const wrapper = mount(OperationBlock, {
+      props: {
+        ...createDefaultProps(),
+        history: [historyEntry],
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+
+    const restored = getResponseBlockProps(wrapper).response
+    expect(restored).not.toBeNull()
+    expect(restored?.status).toBe(201)
+    expect(restored && 'data' in restored ? restored.data : undefined).toBe('{"from":"history"}')
+  })
+
+  it('prefers the in-memory cache over history when both are available', async () => {
+    // After a fresh send, `responseCache` holds the live response (with
+    // streams, full body, etc.). The history fallback should only kick in
+    // when the cache misses — it must not overwrite a cache hit.
+    const liveResponse: ResponseInstance = {
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      cookieHeaderKeys: [],
+      duration: 100,
+      method: 'get',
+      path: '/api/users',
+      data: '{"from":"cache"}',
+      size: 16,
+      ok: true,
+      redirected: false,
+      type: 'basic',
+      url: 'https://api.example.com/api/users',
+      body: null,
+      bodyUsed: false,
+      arrayBuffer: vi.fn(),
+      blob: vi.fn(),
+      formData: vi.fn(),
+      json: vi.fn(),
+      text: vi.fn(),
+      clone: vi.fn(),
+      bytes: vi.fn(),
+    }
+
+    const historyEntry = {
+      time: 250,
+      timestamp: Date.now(),
+      request: {
+        method: 'GET',
+        url: 'https://api.example.com/api/users',
+        httpVersion: 'HTTP/1.1',
+        headers: [],
+        queryString: [],
+        cookies: [],
+        headersSize: -1,
+        bodySize: -1,
+      },
+      response: {
+        status: 201,
+        statusText: 'Created',
+        httpVersion: 'HTTP/1.1',
+        headers: [],
+        cookies: [],
+        content: { size: 19, mimeType: 'application/json', text: '{"from":"history"}' },
+        redirectURL: '',
+        headersSize: -1,
+        bodySize: 19,
+      },
+      meta: { example: 'default' },
+      requestMetadata: { variables: {} },
+    }
+
+    vi.mocked(buildRequest).mockReturnValue(
+      ok({
+        controller: new AbortController(),
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        isUsingProxy: false,
+      }),
+    )
+    vi.mocked(sendRequest).mockResolvedValue([
+      null,
+      {
+        timestamp: Date.now(),
+        requestPayload: ['https://api.example.com/api/users', { method: 'GET', headers: new Headers() }],
+        response: liveResponse,
+        originalResponse: new Response(),
+      },
+    ])
+
+    const wrapper = mount(OperationBlock, {
+      props: { ...createDefaultProps(), history: [historyEntry] },
+    })
+
+    // Send a request so the cache is populated with the live response.
+    await triggerExecute(wrapper)
+    // Navigate away and back — the cache should win over history.
+    await wrapper.setProps({ path: '/api/posts' })
+    await wrapper.vm.$nextTick()
+    await wrapper.setProps({ path: '/api/users' })
+    await wrapper.vm.$nextTick()
+
+    const restored = getResponseBlockProps(wrapper).response
+    expect(restored && 'data' in restored ? restored.data : undefined).toBe('{"from":"cache"}')
   })
 })

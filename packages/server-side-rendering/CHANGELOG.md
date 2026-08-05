@@ -1,5 +1,78 @@
 # @scalar/server-side-rendering
 
+## 0.1.39
+
+## 0.1.38
+
+## 0.1.37
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.1.36
+
+## 0.1.35
+
+## 0.1.34
+
+## 0.1.33
+
+## 0.1.32
+
+## 0.1.31
+
+## 0.1.30
+
+## 0.1.29
+
+## 0.1.28
+
+## 0.1.27
+
+### Patch Changes
+
+- [#9555](https://github.com/scalar/scalar/pull/9555): Serialize the hydration config compactly instead of pretty-printed. This shrinks the inline hydration script in every server-rendered page and speeds up serialization for large configs.
+- [#9556](https://github.com/scalar/scalar/pull/9556): Speed up the per-render check that rejects nested functions in the config. The common case (no functions) now skips building path strings for every node, while the precise error message is still produced when a nested function is found.
+
+## 0.1.26
+
+## 0.1.25
+
+## 0.1.24
+
+## 0.1.23
+
+## 0.1.22
+
+## 0.1.21
+
+## 0.1.20
+
+## 0.1.19
+
+## 0.1.18
+
+### Patch Changes
+
+- [#9274](https://github.com/scalar/scalar/pull/9274): fix(server-side-rendering): update build script to correct import path
+
+## 0.1.17
+
+## 0.1.16
+
+## 0.1.15
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): Integrate Unhead server-side head rendering in SSR output so `metaData` and title tags are included in the server-rendered HTML document.
+
+## 0.1.14
+
+### Patch Changes
+
+- [#8967](https://github.com/scalar/scalar/pull/8967): Integrate Unhead server-side head rendering in SSR output so `metaData` and title tags are included in the server-rendered HTML document.
+
 ## 0.1.13
 
 ## 0.1.12

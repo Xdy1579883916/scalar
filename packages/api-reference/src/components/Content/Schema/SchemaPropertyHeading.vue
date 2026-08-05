@@ -13,6 +13,7 @@ import { computed, toRef } from 'vue'
 import { Badge } from '@/components/Badge'
 import LinkButton from '@/components/Content/Schema/LinkButton.vue'
 import ScreenReader from '@/components/ScreenReader.vue'
+import { useLocalization } from '@/features/localization'
 
 import { getSchemaType } from './helpers/get-schema-type'
 import { getModelNameFromSchema } from './helpers/schema-name'
@@ -32,6 +33,8 @@ const props = withDefaults(
     hideModelNames?: boolean
     /** When the schema was resolved from a $ref, pass the ref name so it displays as e.g. "Data" instead of "object". */
     modelName?: string | null
+    /** Resolved propertyNames schema, used to surface key constraints like `format` for additional properties. */
+    propertyNames?: SchemaObject
     eventBus?: WorkspaceEventBus | null
   }>(),
   {
@@ -42,6 +45,7 @@ const props = withDefaults(
     eventBus: null,
   },
 )
+const { translate } = useLocalization()
 
 // Convert to reactive refs for composables
 const valueRef = toRef(props, 'value')
@@ -79,13 +83,110 @@ const constValue = computed(() => {
   return undefined
 })
 
+type ValidationProperty = {
+  key: string
+  value: string | number
+  prefix?: string
+  code?: boolean
+  truncate?: boolean
+}
+
+/**
+ * Constraints that live on a leaf (string or number) schema: length, pattern,
+ * format and numeric ranges. Extracted so they can be surfaced for a primitive
+ * schema as well as for a primitive array's items, which are not rendered on
+ * their own. See https://github.com/scalar/scalar/issues/9690
+ */
+const getLeafConstraints = (schema: SchemaObject) => {
+  const properties: ValidationProperty[] = []
+
+  if (isStringSchema(schema)) {
+    if (schema.minLength) {
+      properties.push({
+        key: 'min-length',
+        prefix: `${translate('common.minLength')}: `,
+        value: schema.minLength,
+      })
+    }
+
+    if (schema.maxLength) {
+      properties.push({
+        key: 'max-length',
+        prefix: `${translate('common.maxLength')}: `,
+        value: schema.maxLength,
+      })
+    }
+
+    if (schema.pattern) {
+      properties.push({
+        key: 'pattern',
+        value: schema.pattern,
+        code: true,
+        truncate: true,
+      })
+    }
+  }
+
+  if ((isStringSchema(schema) || isNumberSchema(schema)) && schema.format) {
+    properties.push({
+      key: 'format',
+      value: schema.format,
+      truncate: true,
+    })
+  }
+
+  if (isNumberSchema(schema)) {
+    if (isDefined(schema.exclusiveMinimum)) {
+      properties.push({
+        key: 'exclusive-minimum',
+        prefix: `${translate('common.greaterThan')}: `,
+        value: schema.exclusiveMinimum,
+      })
+    }
+
+    if (isDefined(schema.minimum)) {
+      properties.push({
+        key: 'minimum',
+        prefix: `${translate('common.min')}: `,
+        value: schema.minimum,
+      })
+    }
+
+    if (isDefined(schema.exclusiveMaximum)) {
+      properties.push({
+        key: 'exclusive-maximum',
+        prefix: `${translate('common.lessThan')}: `,
+        value: schema.exclusiveMaximum,
+      })
+    }
+
+    if (isDefined(schema.maximum)) {
+      properties.push({
+        key: 'maximum',
+        prefix: `${translate('common.max')}: `,
+        value: schema.maximum,
+      })
+    }
+
+    if (isDefined(schema.multipleOf)) {
+      properties.push({
+        key: 'multiple-of',
+        prefix: `${translate('common.multipleOf')}: `,
+        value: schema.multipleOf,
+      })
+    }
+  }
+
+  return properties
+}
+
 const validationProperties = computed(() => {
   if (!valueRef.value) {
     return []
   }
 
   const schema = valueRef.value
-  const properties = []
+  const properties: ValidationProperty[] = []
 
   // Array validation properties
   if (isArraySchema(schema)) {
@@ -100,92 +201,17 @@ const validationProperties = computed(() => {
     if (schema.uniqueItems) {
       properties.push({
         key: 'unique-items',
-        value: 'unique!',
+        value: `${translate('common.unique')}!`,
       })
     }
   }
 
-  // String length properties
-  if (isStringSchema(schema)) {
-    if (schema.minLength) {
-      properties.push({
-        key: 'min-length',
-        prefix: 'min length: ',
-        value: schema.minLength,
-      })
-    }
+  properties.push(...getLeafConstraints(schema))
 
-    if (schema.maxLength) {
-      properties.push({
-        key: 'max-length',
-        prefix: 'max length: ',
-        value: schema.maxLength,
-      })
-    }
-
-    // Pattern
-    if (schema.pattern) {
-      properties.push({
-        key: 'pattern',
-        value: schema.pattern,
-        code: true,
-        truncate: true,
-      })
-    }
-  }
-
-  // Format
-  if (isStringSchema(schema) || isNumberSchema(schema)) {
-    if (schema.format) {
-      properties.push({
-        key: 'format',
-        value: schema.format,
-        truncate: true,
-      })
-    }
-  }
-
-  // Numeric validation properties
-  if (isNumberSchema(schema)) {
-    if (isDefined(schema.exclusiveMinimum)) {
-      properties.push({
-        key: 'exclusive-minimum',
-        prefix: 'greater than: ',
-        value: schema.exclusiveMinimum,
-      })
-    }
-
-    if (isDefined(schema.minimum)) {
-      properties.push({
-        key: 'minimum',
-        prefix: 'min: ',
-        value: schema.minimum,
-      })
-    }
-
-    if (isDefined(schema.exclusiveMaximum)) {
-      properties.push({
-        key: 'exclusive-maximum',
-        prefix: 'less than: ',
-        value: schema.exclusiveMaximum,
-      })
-    }
-
-    if (isDefined(schema.maximum)) {
-      properties.push({
-        key: 'maximum',
-        prefix: 'max: ',
-        value: schema.maximum,
-      })
-    }
-
-    if (isDefined(schema.multipleOf)) {
-      properties.push({
-        key: 'multiple-of',
-        prefix: 'multiple of: ',
-        value: schema.multipleOf,
-      })
-    }
+  // Primitive array items carry their own constraints (e.g. an array of `uuid`
+  // strings) but are not rendered separately, so surface them here.
+  if (isArraySchema(schema) && schema.items) {
+    properties.push(...getLeafConstraints(resolve.schema(schema.items)))
   }
 
   return properties
@@ -243,14 +269,46 @@ const displayType = computed(() => {
   return getSchemaType(props.value)
 })
 
+/**
+ * Type and format of the property keys, derived from the propertyNames schema.
+ *
+ * For a map keyed by UUIDs this renders e.g. "string · uuid" so the key
+ * constraints are not lost. Returns undefined when there is nothing to show.
+ */
+const propertyNamesDetail = computed(() => {
+  const schema = props.propertyNames
+  if (!schema) {
+    return undefined
+  }
+
+  const parts = [getSchemaType(schema)]
+  if ('format' in schema && typeof schema.format === 'string') {
+    parts.push(schema.format)
+  }
+
+  const detail = parts.filter(Boolean).join(' · ')
+  return detail.length > 0 ? detail : undefined
+})
+
 const exampleValue = computed(() => {
-  if (isDefined(props.value?.example)) {
+  // Treat only `undefined` as "not set" — `null` is a valid example value on a nullable schema.
+  if (
+    props.value &&
+    'example' in props.value &&
+    props.value.example !== undefined
+  ) {
     return props.value.example
   }
 
   if (props.value && isArraySchema(props.value)) {
-    const itemsExample = resolve.schema(props.value.items)?.example
-    return isDefined(itemsExample) ? itemsExample : undefined
+    const itemsSchema = resolve.schema(props.value.items)
+    if (
+      itemsSchema &&
+      'example' in itemsSchema &&
+      itemsSchema.example !== undefined
+    ) {
+      return itemsSchema.example
+    }
   }
 
   return undefined
@@ -267,15 +325,16 @@ const exampleValue = computed(() => {
     <div
       v-if="props.isDiscriminator"
       class="property-discriminator">
-      Discriminator
+      {{ translate('common.discriminator') }}
     </div>
     <template v-if="props.value">
       <!-- Type information -->
       <SchemaPropertyDetail
         v-if="shouldShowType"
         truncate>
-        <ScreenReader>Type: </ScreenReader>{{ displayType
-        }}<template v-if="modelLink">
+        <ScreenReader>{{ translate('common.type') }}:</ScreenReader>
+        {{ displayType }}
+        <template v-if="modelLink">
           ·
           <LinkButton
             v-if="props.eventBus && modelLink.schemaKey"
@@ -290,15 +349,25 @@ const exampleValue = computed(() => {
         </template>
       </SchemaPropertyDetail>
 
+      <!-- Key constraints from propertyNames (e.g. "keys: string · uuid") -->
+      <SchemaPropertyDetail
+        v-if="propertyNamesDetail"
+        truncate>
+        <template #prefix>{{ translate('common.keys') }}:</template>
+        {{ propertyNamesDetail }}
+      </SchemaPropertyDetail>
+
       <!-- Dynamic validation properties from composable -->
       <SchemaPropertyDetail
         v-for="property in validationProperties"
         :key="property.key"
         :code="property.code"
         :truncate="property.truncate">
-        <ScreenReader v-if="property.key === 'format'">Format:</ScreenReader>
+        <ScreenReader v-if="property.key === 'format'">
+          {{ translate('common.format') }}:
+        </ScreenReader>
         <ScreenReader v-else-if="property.key === 'pattern'">
-          Pattern:
+          {{ translate('common.pattern') }}:
         </ScreenReader>
         <template
           v-if="property.prefix"
@@ -309,7 +378,9 @@ const exampleValue = computed(() => {
       </SchemaPropertyDetail>
 
       <!-- Enum indicator -->
-      <SchemaPropertyDetail v-if="props.enum">enum</SchemaPropertyDetail>
+      <SchemaPropertyDetail v-if="props.enum">
+        {{ translate('common.enum') }}
+      </SchemaPropertyDetail>
     </template>
     <div
       v-if="props.additional"
@@ -317,42 +388,42 @@ const exampleValue = computed(() => {
       <template v-if="props.value?.['x-additionalPropertiesName']">
         {{ props.value['x-additionalPropertiesName'] }}
       </template>
-      <template v-else>additional properties</template>
+      <template v-else>{{ translate('common.additionalProperties') }}</template>
     </div>
     <div
       v-if="props.value?.deprecated"
       class="property-deprecated">
-      <Badge>deprecated</Badge>
+      <Badge>{{ translate('common.deprecated') }}</Badge>
     </div>
     <!-- Don't use `isDefined` here, we want to show `const` when the value is `null` -->
     <div
       v-if="constValue !== undefined"
       class="property-const">
       <SchemaPropertyDetail truncate>
-        <template #prefix>const: </template>
+        <template #prefix>{{ translate('common.const') }}: </template>
         <RenderString :value="constValue" />
       </SchemaPropertyDetail>
     </div>
     <template v-else>
       <!-- Shows only when a composition is used (so props.value?.type is undefined) -->
       <SchemaPropertyDetail v-if="(props.value as any)?.nullable === true">
-        nullable
+        {{ translate('common.nullable') }}
       </SchemaPropertyDetail>
     </template>
     <div
       v-if="props.value?.writeOnly"
       class="property-write-only">
-      write-only
+      {{ translate('common.writeOnly') }}
     </div>
     <div
       v-else-if="props.value?.readOnly"
       class="property-read-only">
-      read-only
+      {{ translate('common.readOnly') }}
     </div>
     <div
       v-if="props.required"
       class="property-required">
-      required
+      {{ translate('common.required') }}
     </div>
     <SchemaPropertyDefault :value="props.value?.default" />
     <SchemaPropertyExamples

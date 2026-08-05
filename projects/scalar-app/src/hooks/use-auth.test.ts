@@ -4,6 +4,10 @@ vi.mock('@/environment', () => ({
   env: { VITE_SERVICES_URL: 'https://api.scalar.test' },
 }))
 
+vi.mock('@scalar/use-toasts', () => ({
+  useToasts: () => ({ toast: vi.fn() }),
+}))
+
 import { useAuth } from './use-auth'
 
 /**
@@ -124,6 +128,35 @@ describe('useAuth', () => {
 
     // email: '' is falsy, so isLoggedIn should not be true
     expect(isLoggedIn.value).toBe(false)
+  })
+
+  describe('logout redirect', () => {
+    afterEach(() => {
+      // Clean up the Electron flag so it does not leak into other tests
+      delete (window as unknown as { electron?: boolean }).electron
+      vi.unstubAllGlobals()
+    })
+
+    it('hard routes to the root path on web', () => {
+      const location = { pathname: '/some/team/workspace', href: '', reload: vi.fn() }
+      vi.stubGlobal('location', location)
+
+      useAuth().logout()
+
+      expect(location.href).toBe('/')
+      expect(location.reload).not.toHaveBeenCalled()
+    })
+
+    it('resets the hash on the current HTML file and reloads on Electron', () => {
+      ;(window as unknown as { electron?: boolean }).electron = true
+      const location = { pathname: '/path/to/index.html', href: '', reload: vi.fn() }
+      vi.stubGlobal('location', location)
+
+      useAuth().logout()
+
+      expect(location.href).toBe('/path/to/index.html#/')
+      expect(location.reload).toHaveBeenCalledOnce()
+    })
   })
 })
 
@@ -259,6 +292,28 @@ describe('refreshTokens', () => {
       }),
     )
   })
+
+  it('includes teamUid in the request body when provided', async () => {
+    const { setTokens, refreshTokens } = useAuth()
+    setTokens(validAccessToken, validRefreshToken)
+
+    const fetchSpy = mockFetch({
+      accessToken: refreshedAccessToken,
+      refreshToken: refreshedRefreshToken,
+    })
+
+    await refreshTokens('team-switch-123')
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.scalar.test/core/login/refresh',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ refreshToken: validRefreshToken, teamUid: 'team-switch-123' }),
+      }),
+    )
+  })
 })
 
 describe('refreshTokens single-flight dedupe', () => {
@@ -319,6 +374,109 @@ describe('refreshTokens single-flight dedupe', () => {
 
     // A fresh call after the first settles should trigger a new fetch
     expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not dedupe calls with different teamUid arguments', async () => {
+    const { setTokens, refreshTokens } = useAuth()
+    setTokens(validAccessToken, validRefreshToken)
+
+    const resolveFetches: Array<(value: unknown) => void> = []
+    const fetchSpy = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetches.push(resolve)
+        }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const background = refreshTokens()
+    const teamSwitch = refreshTokens('team-abc')
+
+    // Both calls should have triggered separate fetches
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+
+    const response = {
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          accessToken: refreshedAccessToken,
+          refreshToken: refreshedRefreshToken,
+        }),
+    }
+    resolveFetches.forEach((r) => r(response))
+
+    await Promise.all([background, teamSwitch])
+  })
+
+  it('dedupes concurrent calls with the same teamUid', async () => {
+    const { setTokens, refreshTokens } = useAuth()
+    setTokens(validAccessToken, validRefreshToken)
+
+    let resolveFetch: (value: unknown) => void = () => null
+    const fetchSpy = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const first = refreshTokens('team-abc')
+    const second = refreshTokens('team-abc')
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    resolveFetch({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          accessToken: refreshedAccessToken,
+          refreshToken: refreshedRefreshToken,
+        }),
+    })
+
+    await Promise.all([first, second])
+  })
+
+  it('does not dedupe a team-switch call into a background refresh', async () => {
+    const { setTokens, refreshTokens } = useAuth()
+    setTokens(validAccessToken, validRefreshToken)
+
+    const resolveFetches: Array<(value: unknown) => void> = []
+    const fetchSpy = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetches.push(resolve)
+        }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    // Background refresh (no teamUid) is in-flight
+    const background = refreshTokens()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // User clicks to switch teams — this must NOT be swallowed
+    const teamSwitch = refreshTokens('team-switch-123')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+
+    // Verify the second call included the teamUid in the body
+    const secondCallBody = JSON.parse((fetchSpy.mock.calls[1]![1] as RequestInit).body as string)
+    expect(secondCallBody).toHaveProperty('teamUid', 'team-switch-123')
+
+    const response = {
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          accessToken: refreshedAccessToken,
+          refreshToken: refreshedRefreshToken,
+        }),
+    }
+    resolveFetches.forEach((r) => r(response))
+
+    await Promise.all([background, teamSwitch])
   })
 
   it('releases the single-flight slot even when the fetch rejects', async () => {

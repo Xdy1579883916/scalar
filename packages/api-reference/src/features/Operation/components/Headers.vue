@@ -1,9 +1,14 @@
 <script lang="ts" setup>
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
-import { ScalarIcon } from '@scalar/components'
+import { ScalarIcon } from '@scalar/components/icon'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
-import type { HeaderObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+import type {
+  HeaderObject,
+  OpenApiDocument,
+} from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+
+import { useLocalization } from '@/features/localization'
 
 import Header from './Header.vue'
 
@@ -11,9 +16,13 @@ const { headers, breadcrumb } = defineProps<{
   headers: Record<string, HeaderObject>
   breadcrumb?: string[]
   eventBus: WorkspaceEventBus | null
+  /** The document the headers belong to, used to resolve schema references for display */
+  document?: OpenApiDocument
   orderRequiredPropertiesFirst: boolean | undefined
   orderSchemaPropertiesBy: 'alpha' | 'preserve' | undefined
+  expandAllSchemaProperties: boolean | undefined
 }>()
+const { translate } = useLocalization()
 </script>
 <template>
   <Disclosure v-slot="{ open }">
@@ -33,8 +42,12 @@ const { headers, breadcrumb } = defineProps<{
             :class="{ 'headers-card-title-icon--open': open }"
             icon="Add"
             size="sm" />
-          <template v-if="open"> Hide Headers </template>
-          <template v-else> Show Headers </template>
+          <template v-if="open">
+            {{ translate('operation.hideHeaders') }}
+          </template>
+          <template v-else>
+            {{ translate('operation.showHeaders') }}
+          </template>
         </DisclosureButton>
         <DisclosurePanel>
           <template
@@ -42,7 +55,9 @@ const { headers, breadcrumb } = defineProps<{
             :key="key">
             <Header
               :breadcrumb="breadcrumb ? [...breadcrumb, 'headers'] : undefined"
+              :document="document"
               :eventBus="eventBus"
+              :expandAllSchemaProperties="expandAllSchemaProperties"
               :header="getResolvedRef(header)"
               :name="key"
               :orderRequiredPropertiesFirst="orderRequiredPropertiesFirst"

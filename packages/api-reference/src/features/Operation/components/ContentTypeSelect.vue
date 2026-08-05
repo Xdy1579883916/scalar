@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { cva, ScalarButton, ScalarListbox } from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarListbox } from '@scalar/components/listbox'
 import { ScalarIconCaretDown } from '@scalar/icons'
+import { cva } from '@scalar/use-hooks/useBindCx'
 import type { MediaTypeObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed } from 'vue'
 
 import ScreenReader from '@/components/ScreenReader.vue'
+import { useLocalization } from '@/features/localization'
 
 const { content } = defineProps<{
   content: Record<string, MediaTypeObject> | undefined
 }>()
+const { translate } = useLocalization()
 
 /** The selected content type with two-way binding */
 const selectedContentType = defineModel<string>({ required: true })
@@ -60,7 +64,9 @@ const contentTypeSelect = cva({
       variant="ghost"
       v-bind="$attrs"
       @click.stop>
-      <ScreenReader>Selected Content Type:</ScreenReader>
+      <ScreenReader>
+        {{ translate('operation.selectedContentType') }}:
+      </ScreenReader>
       <span>{{ selectedContentType }}</span>
       <ScalarIconCaretDown
         class="size-2.75 transition-transform duration-100"

@@ -1,5 +1,78 @@
 # @scalar/snippetz
 
+## 0.9.24
+
+### Patch Changes
+
+- [#9680](https://github.com/scalar/scalar/pull/9680): Tie a snippetz plugin's `client` to its `target` at the type level. Before, a plugin could pair any target with any client (for example `node` + `curl`) without a type error. Now `target: 'node'` only allows node clients, and TypeScript catches mistakes like using the display title `'Fetch'` where the lowercase client id `'fetch'` is expected.
+
+## 0.9.23
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.9.22
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.9.21
+
+## 0.9.20
+
+## 0.9.19
+
+## 0.9.18
+
+## 0.9.17
+
+### Patch Changes
+
+- [#9501](https://github.com/scalar/scalar/pull/9501): Pretty-print JSON bodies in the C/libcurl snippet across multiple lines instead of cramming the whole payload onto a single line
+
+## 0.9.16
+
+## 0.9.15
+
+## 0.9.14
+
+## 0.9.13
+
+### Patch Changes
+
+- [#9429](https://github.com/scalar/scalar/pull/9429): replace `clojure/clj_http` with a native snippetz plugin and remove the legacy httpsnippet-lite clojure target
+- [#9430](https://github.com/scalar/scalar/pull/9430): fix(snippetz): correct curl URL query separator and shell quoting
+- [#9427](https://github.com/scalar/scalar/pull/9427): refactor(snippetz): replace the httpsnippet-lite Kotlin/OkHttp target with a native plugin
+- [#9425](https://github.com/scalar/scalar/pull/9425): refactor(snippetz): replace httpsnippet-lite with a native objc/nsurlsession plugin
+- [#9424](https://github.com/scalar/scalar/pull/9424): Replace the httpsnippet-lite-based csharp/restsharp generator with a native snippetz plugin
+- [#9428](https://github.com/scalar/scalar/pull/9428): refactor(snippetz): replace the httpsnippet-lite Wget client with a native plugin
+
+## 0.9.12
+
+## 0.9.11
+
+## 0.9.10
+
+## 0.9.9
+
+### Patch Changes
+
+- [#9145](https://github.com/scalar/scalar/pull/9145): feat(snippetz): pretty-print JSON values inside cURL `--data` bodies and `--form` multipart parts, including RFC 6839 `+json` structured-syntax types (e.g. `application/vnd.api+json`) and parameterized variants (e.g. `application/json;charset=utf-8`)
+
+## 0.9.8
+
+### Patch Changes
+
+- [#9211](https://github.com/scalar/scalar/pull/9211): fix(snippetz): emit `CURLOPT_CUSTOMREQUEST` for PHP cURL snippets when the method is not GET or POST, so DELETE/PUT/PATCH requests render with the correct verb
+
+## 0.9.7
+
+### Patch Changes
+
+- [#9141](https://github.com/scalar/scalar/pull/9141): fix(snippetz): emit `CURLOPT_CUSTOMREQUEST` for PHP cURL snippets when the method is not GET or POST, so DELETE/PUT/PATCH requests render with the correct verb
+
 ## 0.9.6
 
 ## 0.9.5

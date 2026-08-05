@@ -1,33 +1,44 @@
 <script setup lang="ts">
-import {
-  ScalarModal,
-  ScalarSearchInput,
-  ScalarSearchResultList,
-  type ModalState,
-} from '@scalar/components'
+import { ScalarModal, type ModalState } from '@scalar/components/modal'
+import { ScalarSearchInput } from '@scalar/components/search-input'
+import { ScalarSearchResultList } from '@scalar/components/search-results'
+import type { ModelsSectionLabel } from '@scalar/types/api-reference'
+import type { AsyncApiDocument } from '@scalar/types/asyncapi/3.1'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
-import { nanoid } from 'nanoid'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 
+import { useLocalization } from '@/features/localization'
 import { useSearchIndex } from '@/features/Search/hooks/useSearchIndex'
 
 import SearchResult from './SearchResult.vue'
 
 const props = defineProps<{
   modalState: ModalState
-  document: OpenApiDocument | undefined
+  document: OpenApiDocument | AsyncApiDocument | undefined
   eventBus: WorkspaceEventBus
+  modelsSectionLabel?: ModelsSectionLabel
 }>()
+const { translate } = useLocalization()
 
 /** Base id for the search form */
-const id = nanoid()
+const id = useId()
 /** An id for the results listbox */
 const listboxId = `${id}-search-result`
 /** An id for the results instructions */
 const instructionsId = `${id}-search-instructions`
 
-const { query, results } = useSearchIndex(() => props.document)
+const { query, results } = useSearchIndex(
+  () => props.document,
+  () => props.modelsSectionLabel,
+  () => ({
+    heading: translate('search.entryHeading'),
+    tagGroup: translate('search.entryTagGroup'),
+    webhook: translate('search.entryWebhook'),
+    webhooks: translate('navigation.webhooks'),
+    introduction: translate('navigation.introduction'),
+  }),
+)
 
 const selectedIndex = ref<number | undefined>(undefined)
 
@@ -79,7 +90,7 @@ const activeDescendantId = computed(() => {
 </script>
 <template>
   <ScalarModal
-    aria-label="Reference Search"
+    :aria-label="translate('search.label')"
     :state="modalState"
     variant="search">
     <div
@@ -91,6 +102,9 @@ const activeDescendantId = computed(() => {
         aria-autocomplete="list"
         :aria-controls="listboxId"
         :aria-describedby="instructionsId"
+        :clearLabel="translate('search.clear')"
+        :label="translate('search.inputLabel')"
+        :placeholder="translate('search.placeholder')"
         role="combobox"
         @blur="selectedIndex = undefined"
         @keydown.down.stop.prevent="navigateSearchResults('down')"
@@ -99,7 +113,7 @@ const activeDescendantId = computed(() => {
     </div>
     <ScalarSearchResultList
       :id="listboxId"
-      aria-label="Reference Search Results"
+      :aria-label="translate('search.results')"
       class="custom-scroll px-1 pb-1"
       :noResults="!results.length">
       <template #query>
@@ -110,6 +124,7 @@ const activeDescendantId = computed(() => {
         :id="`search-result-${result.item.id}`"
         :key="result.refIndex"
         :isSelected="selectedIndex === idx"
+        :modelsSectionLabel="props.modelsSectionLabel"
         :result="result"
         @click.prevent="() => handleSelect(idx)" />
     </ScalarSearchResultList>
@@ -119,12 +134,11 @@ const activeDescendantId = computed(() => {
       <span
         aria-hidden="true"
         class="contents">
-        <span>↑↓ Navigate</span>
-        <span>⏎ Select</span>
+        <span>↑↓ {{ translate('search.navigate') }}</span>
+        <span>⏎ {{ translate('search.select') }}</span>
       </span>
       <span class="sr-only">
-        Press up arrow / down arrow to navigate, enter to select, type to filter
-        results
+        {{ translate('search.instructions') }}
       </span>
     </div>
   </ScalarModal>

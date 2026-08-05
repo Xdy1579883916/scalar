@@ -1,27 +1,50 @@
 <script setup lang="ts">
-import {
-  ScalarIconButton,
-  ScalarSidebarSearchButton,
-  useModal,
-} from '@scalar/components'
+import { ScalarIconButton } from '@scalar/components/icon-button'
+import { useModal } from '@scalar/components/modal'
+import { ScalarSidebarSearchButton } from '@scalar/components/sidebar'
 import { isMacOS } from '@scalar/helpers/general/is-mac-os'
 import { ScalarIconMagnifyingGlass } from '@scalar/icons'
+import {
+  DEFAULT_MODELS_SECTION_LABEL,
+  type ModelsSectionLabel,
+} from '@scalar/types/api-reference'
+import type { AsyncApiDocument } from '@scalar/types/asyncapi/3.1'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { useLocalization } from '@/features/localization'
+
 import SearchModal from './SearchModal.vue'
 
-const { searchHotKey = 'k', hideModels = false } = defineProps<{
+const {
+  searchHotKey = 'k',
+  modelsSectionLabel = DEFAULT_MODELS_SECTION_LABEL,
+} = defineProps<{
   forceIcon?: boolean
   searchHotKey?: string
   hideModels?: boolean
-  document?: OpenApiDocument
+  modelsSectionLabel?: ModelsSectionLabel
+  document?: OpenApiDocument | AsyncApiDocument
   eventBus: WorkspaceEventBus
 }>()
 
 const button = ref<InstanceType<typeof ScalarSidebarSearchButton>>()
 const modalState = useModal()
+const { translate } = useLocalization()
+
+/**
+ * Whether the user is on macOS, used to show the correct shortcut symbol.
+ *
+ * This must default to `false` so the server-rendered markup and the first
+ * client render agree. Detecting the platform relies on `navigator`, which is
+ * unavailable during SSR, so we resolve it after mount to avoid a hydration
+ * mismatch.
+ */
+const isMac = ref(false)
+onMounted(() => {
+  isMac.value = isMacOS()
+})
 
 const handleHotKey = (e: KeyboardEvent) => {
   if ((isMacOS() ? e.metaKey : e.ctrlKey) && e.key === searchHotKey) {
@@ -61,27 +84,28 @@ function handleClick() {
   <ScalarIconButton
     v-if="forceIcon"
     :icon="ScalarIconMagnifyingGlass"
-    label="Search"
+    :label="translate('search.label')"
     @click="handleClick" />
   <ScalarSidebarSearchButton
     v-else
     ref="button"
     class="w-full"
     :class="$attrs.class"
+    :shortcutLabel="translate('search.keyboardShortcut')"
     @click="handleClick">
-    <span class="sr-only">Open Search</span>
+    <span class="sr-only">{{ translate('search.open') }}</span>
     <span
       aria-hidden="true"
       class="sidebar-search-placeholder">
-      Search
+      {{ translate('search.label') }}
     </span>
     <template #shortcut>
-      <template v-if="isMacOS()">
-        <span class="sr-only">Command</span>
+      <template v-if="isMac">
+        <span class="sr-only">{{ translate('search.command') }}</span>
         <span aria-hidden="true">⌘</span>
       </template>
       <template v-else>
-        <span class="sr-only">CTRL</span>
+        <span class="sr-only">{{ translate('search.control') }}</span>
         <span aria-hidden="true">⌃</span>
       </template>
       {{ searchHotKey }}
@@ -91,6 +115,6 @@ function handleClick() {
   <SearchModal
     :document
     :eventBus="eventBus"
-    :hideModels="hideModels"
-    :modalState="modalState" />
+    :modalState="modalState"
+    :modelsSectionLabel="modelsSectionLabel" />
 </template>

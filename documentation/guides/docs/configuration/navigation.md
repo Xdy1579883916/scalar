@@ -27,6 +27,8 @@ All navigation is configured within the `navigation.routes` object in your `scal
 
 The `navigation.header` array defines links that appear in the top navigation bar of your documentation site. These are typically used for authentication links, external resources, or call-to-action buttons. Each item can be `type: "link"` or `type: "spacer"`. A spacer pushes items before it to the left and items after it to the right.
 
+The header only renders when this array has at least one item, and it is where your [logo](site-config.md#logo) appears. If you want the logo in the header but have no links to put there, a single spacer is enough.
+
 ### Example
 
 ```json
@@ -117,6 +119,8 @@ The `navigation.sidebar` array defines links that appear in the footer of the si
 
 The `navigation.tabs` array defines tabs that appear in the navigation area. Tabs provide a way to organize and highlight specific sections of your documentation, such as API references, that you want users to access quickly.
 
+Tabs and a header work together, and you do not need both. If you use tabs without a header, your [logo](site-config.md#logo) renders in the tab bar.
+
 ### Example
 
 ```json
@@ -160,7 +164,7 @@ You can define multiple tabs to provide quick access to different sections:
   },
   {
     "title": "SDKs",
-    "path": "/products/sdks",
+    "path": "/products/sdk-generator",
     "icon": "phosphor/regular/package"
   }
 ]
@@ -188,11 +192,39 @@ Pages render markdown content from files in your repository. They are the most c
 | `description`   | `string`  | No       | A description for SEO and metadata                        |
 | `icon`          | `string`  | No       | An icon to display next to the page                       |
 | `showInSidebar` | `boolean` | No       | Whether to show the page in the sidebar (defaults `true`) |
+| `hidden`        | `boolean` | No       | Fully hide the page: no sidebar entry, no sitemap entry, and `noindex` (defaults `false`) |
 | `layout`        | `object`  | No       | Layout configuration options                              |
 
 ### Hidden pages
 
-Set `showInSidebar` to `false` to hide a page from the sidebar navigation while keeping it accessible via its direct URL. This is useful for special pages like landing pages, promotional content, or forms that should not clutter the main navigation.
+There are two ways to keep a page out of your navigation, depending on whether the page should still be discoverable by search engines.
+
+#### Truly hidden pages with `hidden`
+
+Set `hidden` to `true` to fully hide a page. The page is:
+
+- removed from the sidebar navigation,
+- excluded from the generated `sitemap.xml`, and
+- rendered with a `<meta name="robots" content="noindex">` tag so search engines do not index it.
+
+The page stays reachable at its URL, which makes it a good fit for unlisted content like internal notes, early drafts, or pages you only want to share by direct link.
+
+```json
+"/internal-notes": {
+  "type": "page",
+  "title": "Internal Notes",
+  "filepath": "docs/internal-notes.md",
+  "hidden": true
+}
+```
+
+If you need to override the automatic `noindex` for a hidden page, an explicit `robots` meta tag in the page's `head` configuration takes precedence.
+
+Note that the site's `robots.txt` intentionally keeps allowing crawlers: they must be able to fetch the page to see the `noindex` tag, and URLs blocked by `robots.txt` can still show up in search results (title-only) when external sites link to them.
+
+#### Sidebar-only hiding with `showInSidebar`
+
+Set `showInSidebar` to `false` to hide a page from the sidebar navigation only. This is purely cosmetic: the page remains in the sitemap and stays indexable by search engines. This is useful for special pages like landing pages, promotional content, or forms that should not clutter the main navigation but should still be found through search.
 
 ```json
 "/enterprise": {
@@ -204,6 +236,8 @@ Set `showInSidebar` to `false` to hide a page from the sidebar navigation while 
 ```
 
 Users can still navigate to `/enterprise` directly, but the page will not appear in the sidebar. To make a page visible in the sidebar again, remove the `showInSidebar` property or set it to `true`.
+
+In short: use `hidden: true` when the page should be invisible to search engines, and `showInSidebar: false` when it should only be invisible in the sidebar.
 
 ### Layout Options
 
@@ -274,7 +308,7 @@ You can configure the search behavior on a per-page basis:
 Scalar supports three ways to generate API references from OpenAPI documents:
 
 1. using a local file,
-2. the [Registry](../../registry/getting-started.md), or
+2. the [Registry](../../registry/index.md), or
 3. remote URLs.
 
 ### 1. Files
@@ -294,7 +328,7 @@ Reference an OpenAPI file stored in your repository by specifying a relative pat
 
 ### 2. Registry
 
-Upload your OpenAPI document to the [Registry](../../registry/getting-started.md), then reference it by namespace and slug:
+Upload your OpenAPI document to the [Registry](../../registry/index.md), then reference it by namespace and slug:
 
 ```bash
 scalar auth login
@@ -327,11 +361,56 @@ Fetch an OpenAPI document from a remote URL. The document is fetched on each pag
 }
 ```
 
+### Properties
+
+| Property     | Type                             | Required | Description                                                      |
+| ------------ | -------------------------------- | -------- | ---------------------------------------------------------------- |
+| `type`       | `"openapi"`                      | Yes      | Must be `"openapi"`                                              |
+| `title`      | `string`                         | No       | The display text in the navigation                               |
+| `filepath`   | `string`                         | No       | Relative path to the OpenAPI file                                |
+| `url`        | `string`                         | No       | URL to fetch the OpenAPI document from                           |
+| `namespace`  | `string`                         | No       | Registry namespace (when using Registry)                         |
+| `slug`       | `string`                         | No       | Registry slug (when using Registry)                              |
+| `version`    | `string`                         | No       | Registry version (when using Registry)                           |
+| `icon`       | `string`                         | No       | An icon to display next to the reference                         |
+| `mode`       | `"flat" \| "nested" \| "folder"` | No       | How the API reference is displayed in the sidebar                |
+| `singlePage` | `boolean`                        | No       | Render all operations on a single page (defaults to `false`)     |
+| `hidden`     | `boolean`                        | No       | Fully hide the API reference and all its generated pages (defaults to `false`) |
+| `config`     | `object`                         | No       | API Reference configuration options                              |
+
 ### Display Modes
 
 - `folder` (default): Shows a single level of links with a folder icon
-- `flat` Shows a single level of links with a section title
-- `nested` Shows a sub-sidebar with breadcrumbs for deep navigation
+- `flat`: Shows a single level of links with a section title
+- `nested`: Shows a sub-sidebar with breadcrumbs for deep navigation
+
+### Single Page Mode
+
+By default, Docs creates a separate page for each API operation. Set `singlePage` to `true` to render all operations on a single page instead:
+
+```json
+"/api": {
+  "type": "openapi",
+  "title": "My API",
+  "filepath": "docs/api-reference/openapi.yaml",
+  "singlePage": true
+}
+```
+
+This is useful when you want a scrollable, single-page API reference similar to traditional API documentation layouts.
+
+### Hiding an API Reference
+
+Set `hidden` to `true` to fully hide an API reference. The setting cascades to every page generated from the OpenAPI document — all operation, tag, model, and webhook pages are removed from the sidebar, excluded from `sitemap.xml`, and rendered with a `noindex` meta tag. The pages stay reachable at their URLs, so you can still share them by direct link. See [Hidden pages](#hidden-pages) for details on how `hidden` compares to `showInSidebar`.
+
+```json
+"/internal-api": {
+  "type": "openapi",
+  "title": "Internal API",
+  "filepath": "docs/internal-api/openapi.yaml",
+  "hidden": true
+}
+```
 
 ### API Reference configuration
 
@@ -390,13 +469,16 @@ Groups allow you to organize related pages, API references, and links into colla
 
 ### Properties
 
-| Property   | Type                             | Required | Description                          |
-| ---------- | -------------------------------- | -------- | ------------------------------------ |
-| `type`     | `"group"`                        | Yes      | Must be `"group"`                    |
-| `title`    | `string`                         | No       | The display text in the navigation   |
-| `children` | `object`                         | Yes      | An object containing nested routes   |
-| `mode`     | `"flat" \| "nested" \| "folder"` | No       | How the group is displayed           |
-| `icon`     | `string`                         | No       | An icon to display next to the group |
+| Property   | Type                             | Required | Description                                                      |
+| ---------- | -------------------------------- | -------- | ---------------------------------------------------------------- |
+| `type`     | `"group"`                        | Yes      | Must be `"group"`                                                |
+| `title`    | `string`                         | No       | The display text in the navigation                               |
+| `children` | `object`                         | Yes      | An object containing nested routes                               |
+| `mode`     | `"flat" \| "nested" \| "folder"` | No       | How the group is displayed                                       |
+| `icon`     | `string`                         | No       | An icon to display next to the group                             |
+| `page`     | `object`                         | No       | A page to navigate to when clicking the folder (folder mode only) |
+| `open`     | `boolean`                        | No       | Whether the folder is expanded by default (folder mode only)     |
+| `hidden`   | `boolean`                        | No       | Fully hide the group and everything nested under it (defaults to `false`) |
 
 ### Display Modes
 
@@ -405,6 +487,27 @@ Groups support three display modes:
 - **`flat`**: Shows a section title with child links directly beneath it. Ideal for top-level categories.
 - **`nested`**: Shows a sub-sidebar with breadcrumbs for deep navigation. Good for complex documentation structures.
 - **`folder`**: (default): Shows a single level of links with a folder icon. Suitable for simple groupings.
+
+### Hiding Groups
+
+Set `hidden` to `true` on a group to fully hide it along with everything nested under it — child pages, nested groups, and any API references. All affected pages are removed from the sidebar, excluded from `sitemap.xml`, and rendered with a `noindex` meta tag, while remaining reachable at their URLs. See [Hidden pages](#hidden-pages) for details on how `hidden` compares to `showInSidebar`.
+
+This works at both levels: on a top-level route section directly under `navigation.routes` and on a group nested inside another group, with the same cascade to every page underneath. Since a top-level route section has no sidebar row of its own, `hidden` there only affects indexing — and any [tabs](#tabs) or [header links](#header) pointing at that section are configured separately and are not removed automatically.
+
+```json
+"/internal": {
+  "type": "group",
+  "title": "Internal",
+  "hidden": true,
+  "children": {
+    "/runbooks": {
+      "type": "page",
+      "title": "Runbooks",
+      "filepath": "docs/internal/runbooks.md"
+    }
+  }
+}
+```
 
 ### Nesting Groups
 
@@ -445,6 +548,72 @@ Groups can contain other groups to create deep navigation hierarchies:
 }
 ```
 
+### Folder Landing Pages
+
+Folders can have an associated landing page using the `page` property. When a user clicks on the folder title in the sidebar, they navigate to this page instead of just expanding the folder. This is useful for sections that need both an overview page and child pages.
+
+```json
+"/company": {
+  "type": "group",
+  "title": "Company",
+  "mode": "folder",
+  "icon": "phosphor/regular/building",
+  "page": {
+    "type": "page",
+    "title": "About Us",
+    "filepath": "docs/company/index.md"
+  },
+  "children": {
+    "/team": {
+      "type": "page",
+      "title": "Our Team",
+      "filepath": "docs/company/team.md"
+    },
+    "/careers": {
+      "type": "page",
+      "title": "Careers",
+      "filepath": "docs/company/careers.md"
+    }
+  }
+}
+```
+
+In this example, clicking "Company" in the sidebar navigates to the "About Us" page (`docs/company/index.md`), while the folder can still be expanded to show "Our Team" and "Careers" as child pages.
+
+The `page` property accepts the same configuration as a regular page route:
+
+| Property      | Type      | Required | Description                        |
+| ------------- | --------- | -------- | ---------------------------------- |
+| `type`        | `"page"`  | Yes      | Must be `"page"`                   |
+| `title`       | `string`  | No       | The display text for the page      |
+| `filepath`    | `string`  | Yes      | Relative path to the markdown file |
+| `description` | `string`  | No       | A description for SEO and metadata |
+
+### Default Folder State
+
+By default, folders start in a collapsed state. Use the `open` property to have a folder expanded when the page loads:
+
+```json
+"/guides": {
+  "type": "group",
+  "title": "Guides",
+  "mode": "folder",
+  "open": true,
+  "children": {
+    "/quickstart": {
+      "type": "page",
+      "title": "Quickstart",
+      "filepath": "docs/guides/quickstart.md"
+    },
+    "/advanced": {
+      "type": "page",
+      "title": "Advanced Usage",
+      "filepath": "docs/guides/advanced.md"
+    }
+  }
+}
+```
+
 ## Links
 
 Links allow you to add external URLs to your navigation. Unlike pages that render content from files, links redirect users to external resources.
@@ -462,10 +631,13 @@ Links allow you to add external URLs to your navigation. Unlike pages that rende
 
 | Property | Type     | Required | Description                         |
 | -------- | -------- | -------- | ----------------------------------- |
-| `type`   | `"link"` | Yes      | Must be `"link"`                    |
-| `title`  | `string` | No       | The display text in the navigation  |
-| `url`    | `string` | Yes      | The external URL to link to         |
-| `icon`   | `string` | No       | An icon to display next to the link |
+| `type`   | `"link"`  | Yes      | Must be `"link"`                    |
+| `title`  | `string`  | No       | The display text in the navigation  |
+| `url`    | `string`  | Yes      | The external URL to link to         |
+| `icon`   | `string`  | No       | An icon to display next to the link |
+| `hidden` | `boolean` | No       | Hide the link from the sidebar (defaults to `false`) |
+
+Since a link points to an external URL, there is no page to exclude from the sitemap or deindex — on links, `hidden: true` only removes the sidebar entry. The option exists on all route types for consistency.
 
 ### Example
 

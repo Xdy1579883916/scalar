@@ -12,10 +12,14 @@
 @import "@scalar/components/vue-styles.css";
 @import "@scalar/sidebar/vue-styles.css";
 @import "@scalar/api-client/vue-styles.css";
+@import "@scalar/blocks/vue-styles.css";
 @import "@scalar/agent-chat/vue-styles.css";
 
 /* API Reference Tailwind Configuration */
 @import "./styles/tailwind.config.css";
+
+/* Print overrides, flattening the fixed viewport shell into a document */
+@import "./styles/print.css";
 
 /* Generate the Tailwind Utilities (scoped) */
 .scalar-app {

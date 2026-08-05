@@ -1,4 +1,5 @@
-import { createNavigation } from '@scalar/workspace-store/navigation'
+import type { AsyncApiDocument } from '@scalar/types/asyncapi/3.1'
+import { createNavigation, traverseAsyncApiDocument } from '@scalar/workspace-store/navigation'
 import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { describe, expect, it } from 'vitest'
 
@@ -20,6 +21,7 @@ const introductionSearchEntry = {
 
 function createMockDocument(document: Partial<OpenApiDocument>) {
   const doc = {
+    openapi: '3.1.0',
     info: {
       title: 'Test API',
       version: '1.0.0',
@@ -130,7 +132,7 @@ describe('createSearchIndex', () => {
       expect(index.map((item) => item.title)).toEqual(['Introduction', 'Get Users', 'Create User', 'Get Posts'])
     })
 
-    it('includes path item parameters in operation index body', () => {
+    it('includes path item parameter names and descriptions in the operation index', () => {
       const document = createMockDocument({
         paths: {
           '/users/{userId}': {
@@ -155,8 +157,9 @@ describe('createSearchIndex', () => {
       expect(operationEntry).toMatchObject({
         type: 'operation',
         title: 'Get User',
-        body: '',
-        parameters: ['userId REQUIRED path Unique user identifier'],
+        body: [],
+        parameters: ['userId'],
+        parameterDescriptions: ['Unique user identifier'],
       })
     })
 
@@ -190,7 +193,7 @@ describe('createSearchIndex', () => {
       expect(operationEntry).toMatchObject({
         type: 'operation',
         title: 'Create User',
-        body: expect.arrayContaining(['Body', 'name optional string', 'email optional string']),
+        body: ['name', 'email'],
       })
     })
 
@@ -223,7 +226,7 @@ describe('createSearchIndex', () => {
       expect(operationEntry).toMatchObject({
         type: 'operation',
         title: 'Create User',
-        body: expect.arrayContaining(['Body', 'xmlField optional string']),
+        body: ['xmlField'],
       })
     })
 
@@ -264,7 +267,7 @@ describe('createSearchIndex', () => {
       expect(operationEntry).toMatchObject({
         type: 'operation',
         title: 'Create User',
-        body: expect.arrayContaining(['jsonField optional string', 'xmlField optional number']),
+        body: ['jsonField', 'xmlField'],
       })
     })
 
@@ -292,11 +295,13 @@ describe('createSearchIndex', () => {
       expect(operationEntry).toEqual({
         type: 'operation',
         title: 'Get Users',
-        parameters: ['limit optional query Number of users to return'],
+        parameters: ['limit'],
+        parameterDescriptions: ['Number of users to return'],
         path: '/users',
         method: 'get',
         responseExamples: [],
-        body: '',
+        body: [],
+        bodyDescriptions: [],
         description: '',
         entry: expect.any(Object),
         id: expect.any(String),
@@ -358,7 +363,7 @@ describe('createSearchIndex', () => {
   })
 
   describe('schemas', () => {
-    it('adds a single schema', () => {
+    it('adds a single schema with property names and descriptions', () => {
       const index = createSearchIndex(
         createMockDocument({
           components: {
@@ -367,6 +372,10 @@ describe('createSearchIndex', () => {
                 type: 'object',
                 title: 'User Model',
                 description: 'A user object',
+                properties: {
+                  name: { type: 'string', description: 'Display name' },
+                  email: { type: 'string' },
+                },
               },
             },
           },
@@ -382,15 +391,16 @@ describe('createSearchIndex', () => {
         },
         {
           title: 'User Model',
-          description: 'Model',
-          body: 'A user object',
+          description: 'Models',
+          body: ['name', 'email'],
+          bodyDescriptions: ['A user object', 'Display name'],
         },
       ])
 
       expect(index.length).toEqual(3)
     })
 
-    it('adds schema without description', () => {
+    it('adds schema without description or properties', () => {
       const index = createSearchIndex(
         createMockDocument({
           components: {
@@ -413,8 +423,9 @@ describe('createSearchIndex', () => {
         },
         {
           title: 'Post Model',
-          description: 'Model',
-          body: '',
+          description: 'Models',
+          body: [],
+          bodyDescriptions: [],
         },
       ])
     })
@@ -442,8 +453,77 @@ describe('createSearchIndex', () => {
       expect(index.length).toEqual(4) // Introduction + models heading + 2 schemas
       expect(index[0]).toMatchObject({ type: 'heading', title: 'Introduction' })
       expect(index[1]).toMatchObject({ type: 'heading', title: 'Models' })
-      expect(index[2]).toMatchObject({ title: 'User Model', body: 'A user object' })
-      expect(index[3]).toMatchObject({ title: 'Post Model', body: 'A post object' })
+      expect(index[2]).toMatchObject({ title: 'User Model', bodyDescriptions: ['A user object'] })
+      expect(index[3]).toMatchObject({ title: 'Post Model', bodyDescriptions: ['A post object'] })
+    })
+
+    it('uses Schemas labels when modelsSectionLabel is Schemas', () => {
+      const doc = createMockDocument({
+        components: {
+          schemas: {
+            User: {
+              type: 'object',
+              title: 'User Model',
+              description: 'A user object',
+            },
+          },
+        },
+      })
+
+      doc['x-scalar-navigation'] = createNavigation('test', doc, {
+        hideModels: false,
+        modelsSectionLabel: 'Schemas',
+      })
+
+      const index = createSearchIndex(doc, { modelsSectionLabel: 'Schemas' })
+
+      expect(index[1]).toMatchObject({
+        type: 'heading',
+        title: 'Schemas',
+        description: 'Heading',
+      })
+      expect(index[2]).toMatchObject({
+        title: 'User Model',
+        description: 'Schemas',
+      })
+    })
+
+    it('collects property names through a oneOf model schema', () => {
+      // Mirrors the Galaxy spec's CelestialBody — top-level oneOf of two $ref-ed object schemas.
+      const planet = {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          failureCallbackUrl: { type: 'string' },
+        },
+      }
+      const satellite = {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          diameter: { type: 'number' },
+        },
+      }
+      const document = createMockDocument({
+        components: {
+          schemas: {
+            Planet: planet,
+            Satellite: satellite,
+            CelestialBody: {
+              title: 'CelestialBody',
+              oneOf: [
+                { $ref: '#/components/schemas/Planet', '$ref-value': planet },
+                { $ref: '#/components/schemas/Satellite', '$ref-value': satellite },
+              ],
+            },
+          },
+        },
+      } as unknown as Partial<OpenApiDocument>)
+
+      const index = createSearchIndex(document)
+      const celestialEntry = index.find((item) => item.type === 'model' && item.title === 'CelestialBody')
+
+      expect(celestialEntry?.body).toEqual(['name', 'failureCallbackUrl', 'diameter'])
     })
   })
 
@@ -505,7 +585,8 @@ describe('createSearchIndex', () => {
           method: 'delete',
           title: 'User Deleted Webhook',
           description: 'Webhook',
-          body: 'Triggered when a user is deleted',
+          body: '',
+          bodyDescriptions: ['Triggered when a user is deleted'],
         },
       ])
     })
@@ -536,6 +617,7 @@ describe('createSearchIndex', () => {
           title: 'User Updated Webhook',
           description: 'Webhook',
           body: '',
+          bodyDescriptions: [],
         },
       ])
     })
@@ -860,6 +942,58 @@ describe('createSearchIndex', () => {
       expect(tagEntries.length).toBeGreaterThanOrEqual(2)
       expect(operationEntries.length).toBeGreaterThanOrEqual(3)
       expect(modelEntries.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
+  describe('AsyncAPI documents', () => {
+    it('indexes the Introduction entry and headings from info.description', () => {
+      const document = {
+        asyncapi: '3.0.0',
+        info: {
+          title: 'Streaming API',
+          version: '1.0.0',
+          description: 'Welcome to the streaming API.\n\n## Getting started\n\nConnect to a channel and subscribe.',
+        },
+        'x-scalar-original-document-hash': '',
+      } as AsyncApiDocument
+
+      document['x-scalar-navigation'] = traverseAsyncApiDocument('test', document)
+
+      const index = createSearchIndex(document)
+
+      const headings = index.filter((item) => item.type === 'heading')
+      expect(headings.map((item) => item.title)).toEqual(expect.arrayContaining(['Introduction', 'Getting started']))
+    })
+
+    it('indexes components.schemas as models with their property names and descriptions', () => {
+      const document = {
+        asyncapi: '3.0.0',
+        info: { title: 'Streaming API', version: '1.0.0' },
+        'x-scalar-original-document-hash': '',
+        components: {
+          schemas: {
+            PlanetEvent: {
+              type: 'object',
+              description: 'A planet lifecycle event',
+              properties: {
+                planetName: { type: 'string', description: 'Name of the planet' },
+                eventType: { type: 'string' },
+              },
+            },
+          },
+        },
+      } as unknown as AsyncApiDocument
+
+      document['x-scalar-navigation'] = traverseAsyncApiDocument('test', document)
+
+      const index = createSearchIndex(document)
+
+      const model = index.find((item) => item.type === 'model' && item.title === 'PlanetEvent')
+      expect(model).toBeDefined()
+      expect(model?.body).toEqual(expect.arrayContaining(['planetName', 'eventType']))
+      expect(model?.bodyDescriptions).toEqual(
+        expect.arrayContaining(['A planet lifecycle event', 'Name of the planet']),
+      )
     })
   })
 })

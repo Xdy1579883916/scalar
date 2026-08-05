@@ -1,28 +1,25 @@
 <script setup lang="ts">
+import { ScalarHeader } from '@scalar/components/header'
 import {
-  ScalarHeader,
   ScalarMenu,
   ScalarMenuLink,
   ScalarMenuProducts,
   ScalarMenuResources,
   ScalarMenuSection,
-} from '@scalar/components'
+  ScalarMenuTeamPicker,
+  type ScalarMenuTeamOption,
+} from '@scalar/components/menu'
 import { ScalarIconGear } from '@scalar/icons'
+import { computed } from 'vue'
 
-defineProps<{
-  /**
-   * Inline label rendered inside the menu trigger between the logo and the
-   * caret. Used to surface the active scope ("Team" / "Local") so the menu
-   * trigger doubles as the leading breadcrumb segment. Pass a plain string
-   * so consumers do not have to pierce through a slot pipeline just to
-   * tell the header which workspace type is active.
-   */
-  menuTitle?: string
-}>()
+import { useAuth } from '@/hooks/use-auth'
+import { useTeams } from '@/hooks/use-teams'
 
 const emit = defineEmits<{
   /** Emitted when the user wants to open the workspace settings */
   (e: 'navigate:to:settings'): void
+  /** Emitted when the user has changed team */
+  (e: 'changed:team'): void
 }>()
 
 const slots = defineSlots<{
@@ -44,6 +41,36 @@ const slots = defineSlots<{
   /** Slot for customizing the end of the header */
   end?(): unknown
 }>()
+
+const { currentTeam, teams: allTeams } = useTeams()
+const { isLoggedIn, refreshTokens } = useAuth()
+
+/** Convert teams to menu items */
+const teams = computed<ScalarMenuTeamOption[]>(
+  () =>
+    allTeams.value?.map((t) => ({
+      id: t.uid,
+      label: t.name,
+      src: t.imageUri,
+    })) ?? [],
+)
+
+/** Select the current team option */
+const team = computed<ScalarMenuTeamOption | undefined>(() =>
+  teams.value.find((t) => t.id === currentTeam.value?.uid),
+)
+
+/** Refresh tokens with the selected team UID then navigate to the workspace root */
+const switchTeam = async (t?: ScalarMenuTeamOption) => {
+  if (!t || t.id === currentTeam.value?.uid) {
+    return
+  }
+
+  const result = await refreshTokens(t?.id)
+  if (result.ok) {
+    emit('changed:team')
+  }
+}
 </script>
 
 <template>
@@ -55,18 +82,17 @@ const slots = defineSlots<{
           #logo>
           <slot name="logo" />
         </template>
-        <template
-          v-if="menuTitle"
-          #title>
-          <span class="max-md:hidden">
-            {{ menuTitle }}
-          </span>
-        </template>
         <template #products>
           <ScalarMenuProducts selected="client" />
         </template>
         <template #sections="{ close }">
           <ScalarMenuSection>
+            <ScalarMenuTeamPicker
+              v-if="isLoggedIn"
+              :allowAddTeam="false"
+              :team
+              :teams
+              @update:team="switchTeam" />
             <slot name="menuItems">
               <ScalarMenuLink
                 is="button"

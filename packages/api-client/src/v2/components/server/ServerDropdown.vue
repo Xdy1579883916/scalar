@@ -21,11 +21,9 @@ export type ServerDropdownProps = {
 }
 </script>
 <script setup lang="ts">
-import {
-  ScalarButton,
-  ScalarFloatingBackdrop,
-  ScalarPopover,
-} from '@scalar/components'
+import { ScalarButton } from '@scalar/components/button'
+import { ScalarFloatingBackdrop } from '@scalar/components/floating'
+import { ScalarPopover } from '@scalar/components/popover'
 import { ScalarIconPencilSimple, ScalarIconPlus } from '@scalar/icons'
 import type {
   ApiReferenceEvents,
@@ -80,7 +78,7 @@ const serverUrlWithoutTrailingSlash = computed(() => {
     :target="target"
     :teleport="`#${target}`">
     <ScalarButton
-      class="hover:bg-b-2 font-code text-c-2 ml-0.75 h-auto gap-0.75 rounded border px-1.5 text-base whitespace-nowrap"
+      class="hover:bg-b-2 font-code text-c-2 h-auto gap-0.75 rounded border px-1.5 text-base whitespace-nowrap @3xl:ml-0.75"
       variant="ghost">
       <template v-if="server">
         <span class="sr-only">Server:</span>

@@ -1,5 +1,55 @@
 # @scalar/docusaurus
 
+## 0.8.33
+
+## 0.8.32
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 0.8.31
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 0.8.30
+
+## 0.8.29
+
+## 0.8.28
+
+### Patch Changes
+
+- [#9588](https://github.com/scalar/scalar/pull/9588): Fix function-valued configuration options (like `onBeforeRequest` and the request hooks) being dropped in the Docusaurus integration. Docusaurus JSON-serializes route props, which silently strips functions, so the config is now serialized to JavaScript in the plugin and injected as a script. Exposes a reusable `serializeConfigToJs` helper from `@scalar/client-side-rendering`.
+
+## 0.8.27
+
+## 0.8.26
+
+## 0.8.25
+
+## 0.8.24
+
+## 0.8.23
+
+## 0.8.22
+
+## 0.8.21
+
+## 0.8.20
+
+## 0.8.19
+
+## 0.8.18
+
+## 0.8.17
+
+## 0.8.16
+
+## 0.8.15
+
 ## 0.8.14
 
 ## 0.8.13

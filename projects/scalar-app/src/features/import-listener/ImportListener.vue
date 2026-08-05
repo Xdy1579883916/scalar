@@ -1,9 +1,7 @@
 <script lang="ts" setup>
-import {
-  useModal,
-  type ScalarListboxOption,
-  type WorkspaceGroup,
-} from '@scalar/components'
+import { type ScalarListboxOption } from '@scalar/components/listbox'
+import { type WorkspaceGroup } from '@scalar/components/menu'
+import { useModal } from '@scalar/components/modal'
 import { type LoaderPlugin } from '@scalar/json-magic/bundle'
 import { useToasts } from '@scalar/use-toasts'
 import {
@@ -17,45 +15,66 @@ import { loadDocumentFromSource } from '@/features/import-listener/helpers/load-
 import {
   type CreateWorkspacePayload,
   type ImportEventData,
+  type NavigateToDocumentPayload,
 } from '@/features/import-listener/types'
 
 import DropEventListener from './components/DropEventListener.vue'
 import ImportModal from './components/ImportModal.vue'
-import { getUrlQueryParameter } from './helpers/get-url-query-parameter'
+import { getImportFromQuery } from './helpers/get-import-from-query'
 import { importDocumentToWorkspace } from './helpers/import-document-to-workspace'
 import { waitForCondition } from './helpers/wait-for-condition'
 
-const { workspaceStore, darkMode, fileLoader, isOnlyOneWorkspace } =
-  defineProps<{
-    /**
-     * Whether the user have only one workspace on the app.
-     * This is used to determine if the import listener should direct import the document.
-     */
-    isOnlyOneWorkspace: boolean
-    /**
-     * The workspace store instance.
-     * This is null during initialization until the store is ready.
-     */
-    workspaceStore: WorkspaceStore | null
-    /**
-     * The dark mode setting.
-     * This is used to determine the color mode of the import modal.
-     */
-    darkMode: boolean
-    /**
-     * The file loader.
-     * This is used to load files from the disk (for examole when you are on an Electron app).
-     */
-    fileLoader?: LoaderPlugin
-    /** List of workspace groups */
-    workspaceGroups: WorkspaceGroup[]
-    /** The active workspace */
-    activeWorkspace: ScalarListboxOption | null
-  }>()
+const {
+  workspaceStore,
+  darkMode,
+  fileLoader,
+  fetch,
+  isOnlyOneWorkspace,
+  defaultProxyUrl,
+} = defineProps<{
+  /**
+   * Whether the user have only one workspace on the app.
+   * This is used to determine if the import listener should direct import the document.
+   */
+  isOnlyOneWorkspace: boolean
+  /**
+   * The workspace store instance.
+   * This is null during initialization until the store is ready.
+   */
+  workspaceStore: WorkspaceStore | null
+  /**
+   * The dark mode setting.
+   * This is used to determine the color mode of the import modal.
+   */
+  darkMode: boolean
+  /**
+   * The file loader.
+   * This is used to load files from the disk (for examole when you are on an Electron app).
+   */
+  fileLoader?: LoaderPlugin
+  /**
+   * Custom fetch used to retrieve documents from a URL. On desktop this is the
+   * IPC-backed fetch; the temporary draft store needs it too, otherwise the
+   * renderer's global fetch is blocked by the Content Security Policy.
+   */
+  fetch?: (
+    input: string | URL | globalThis.Request,
+    init?: RequestInit,
+  ) => Promise<Response>
+  /** List of workspace groups */
+  workspaceGroups: WorkspaceGroup[]
+  /** The active workspace */
+  activeWorkspace: ScalarListboxOption | null
+  /**
+   * Default CORS proxy when loading imports (`null` means skip the proxy).
+   * Derived from client layout in app state.
+   */
+  defaultProxyUrl: string | null
+}>()
 
 const emit = defineEmits<{
-  /** Emitted when the user wants to navigate to a document. */
-  (e: 'navigateToDocument', slug: string): void
+  /** Emitted when the user wants to navigate to a document (and optionally an operation). */
+  (e: 'navigateToDocument', payload: NavigateToDocumentPayload): void
   /** Emitted when the user wants to set the active workspace */
   (e: 'set:workspace', id: string): void
   /** Emitted when the user wants to create a new workspace */
@@ -100,6 +119,10 @@ const directImport = async (
   // This is to get the title of the document so we can generate a unique slug for store
   const draftStore = createWorkspaceStore({
     fileLoader,
+    fetch,
+    meta: {
+      'x-scalar-active-proxy': defaultProxyUrl,
+    },
   })
   const success = await loadDocumentFromSource(
     draftStore,
@@ -113,7 +136,11 @@ const directImport = async (
     return
   }
 
-  await handleImportDocument(draftStore.exportWorkspace(), 'drafts')
+  await handleImportDocument(
+    draftStore.exportWorkspace(),
+    'drafts',
+    importEventData,
+  )
 }
 
 /**
@@ -157,6 +184,7 @@ const handleInput = async (importEventData: ImportEventData): Promise<void> => {
 const handleImportDocument = async (
   workspaceState: InMemoryWorkspace,
   name: string,
+  importContext?: ImportEventData | null,
 ): Promise<void> => {
   const result = await importDocumentToWorkspace({
     workspaceStore,
@@ -169,7 +197,13 @@ const handleImportDocument = async (
     return
   }
 
-  emit('navigateToDocument', result.slug)
+  const pendingOperation = importContext ?? data.value
+
+  emit('navigateToDocument', {
+    slug: result.slug,
+    operationPath: pendingOperation?.operationPath,
+    operationMethod: pendingOperation?.operationMethod,
+  })
   modalState.hide()
 }
 
@@ -178,18 +212,10 @@ const handleImportDocument = async (
  * If a URL is found, automatically triggers the import flow.
  */
 onMounted(() => {
-  const urlQueryParameter = getUrlQueryParameter('url')
+  const importFromQuery = getImportFromQuery({ darkMode })
 
-  const logo = darkMode
-    ? getUrlQueryParameter('dark_logo')
-    : getUrlQueryParameter('light_logo')
-
-  if (urlQueryParameter) {
-    void handleInput({
-      source: urlQueryParameter,
-      type: 'url',
-      companyLogo: logo,
-    })
+  if (importFromQuery) {
+    void handleInput(importFromQuery)
   }
 
   if (window.electron === true) {
@@ -205,6 +231,8 @@ onMounted(() => {
   <!-- Import modal for workspace and document selection -->
   <ImportModal
     :activeWorkspace="activeWorkspace"
+    :defaultProxyUrl="defaultProxyUrl"
+    :fetch="fetch"
     :fileLoader="fileLoader"
     :importEventData="data"
     :isLoading="workspaceStore === null"

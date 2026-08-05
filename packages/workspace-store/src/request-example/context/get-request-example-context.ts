@@ -3,6 +3,7 @@ import type { AuthenticationConfiguration } from '@scalar/types/api-reference'
 import type { WorkspaceStore } from '@/client'
 import type { SelectedSecurity } from '@/entities/auth'
 import type { AuthMeta, ServerMeta } from '@/events'
+import { getPathItemOperation, getResolvedPathItem } from '@/helpers/for-each-path-item-operation'
 import { getResolvedRef } from '@/helpers/get-resolved-ref'
 import type { SecuritySchemeObjectSecret } from '@/request-example/builder/security/secret-types'
 import { getActiveEnvironment } from '@/request-example/context/environment'
@@ -17,6 +18,7 @@ import { getSelectedServer, getServers } from '@/request-example/context/servers
 import type { RequestExampleMeta, Result } from '@/request-example/types'
 import type { XScalarEnvironment } from '@/schemas/extensions/document/x-scalar-environments'
 import type { XScalarCookie } from '@/schemas/extensions/general/x-scalar-cookies'
+import { isOpenApiDocument } from '@/schemas/type-guards'
 import type { OperationObject } from '@/schemas/v3.1/strict/operation'
 import type { SecurityRequirementObject } from '@/schemas/v3.1/strict/security-requirement'
 import type { ServerObject } from '@/schemas/v3.1/strict/server'
@@ -80,8 +82,14 @@ export const getRequestExampleContext = (
       error: `Document ${documentName} not found`,
     }
   }
+  if (!isOpenApiDocument(document)) {
+    return {
+      ok: false,
+      error: `Document ${documentName} is not an OpenAPI document`,
+    }
+  }
 
-  const pathItem = getResolvedRef(document.paths?.[path])
+  const pathItem = getResolvedPathItem(document.paths?.[path])
   if (!pathItem) {
     return {
       ok: false,
@@ -89,7 +97,7 @@ export const getRequestExampleContext = (
     }
   }
 
-  const resolvedOperation = getResolvedRef(pathItem[method])
+  const resolvedOperation = getResolvedRef(getPathItemOperation(document.paths?.[path], method))
   if (!resolvedOperation) {
     return {
       ok: false,

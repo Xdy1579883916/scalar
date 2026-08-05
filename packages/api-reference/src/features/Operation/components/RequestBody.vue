@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ScalarMarkdown } from '@scalar/components'
+import { ScalarMarkdown } from '@scalar/components/markdown'
 import type { WorkspaceEventBus } from '@scalar/workspace-store/events'
 import { getResolvedRef } from '@scalar/workspace-store/helpers/get-resolved-ref'
-import type { RequestBodyObject } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
+import type {
+  OpenApiDocument,
+  RequestBodyObject,
+} from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { computed } from 'vue'
 
 import { Schema } from '@/components/Content/Schema'
+import { inferDiscriminatorMappingComposition } from '@/components/Content/Schema/helpers/get-compositions-to-render'
 import { isTypeObject } from '@/components/Content/Schema/helpers/is-type-object'
 import { getModelNameFromSchema } from '@/components/Content/Schema/helpers/schema-name'
 import {
@@ -13,19 +17,24 @@ import {
   sortPropertyNames,
 } from '@/components/Content/Schema/helpers/sort-property-names'
 import LinkButton from '@/components/Content/Schema/LinkButton.vue'
+import { useLocalization } from '@/features/localization'
 
 import ContentTypeSelect from './ContentTypeSelect.vue'
 
-const { requestBody, options } = defineProps<{
+const { requestBody, options, document } = defineProps<{
   breadcrumb?: string[]
   requestBody?: RequestBodyObject
   eventBus: WorkspaceEventBus | null
+  /** The document the request body belongs to, used to resolve schema references for display */
+  document?: OpenApiDocument
   options: {
     orderRequiredPropertiesFirst: boolean | undefined
     orderSchemaPropertiesBy: 'alpha' | 'preserve' | undefined
     hideModels: boolean | undefined
+    expandAllSchemaProperties: boolean | undefined
   }
 }>()
+const { translate } = useLocalization()
 
 /**
  * The maximum number of properties to show in the request body schema.
@@ -65,6 +74,14 @@ const modelLink = computed(
 const partitionedSchema = computed(() => {
   // Early return if not an object schema
   if (!schema.value || !isTypeObject(schema.value)) {
+    return null
+  }
+
+  // A schema whose variants are inferred from a `discriminator.mapping` renders
+  // as a single variant selector, not a flat property list. Splitting it would
+  // duplicate that selector across the visible and collapsed blocks, so we keep
+  // it whole. See https://github.com/scalar/scalar/issues/7472
+  if (inferDiscriminatorMappingComposition(schema.value, document)) {
     return null
   }
 
@@ -124,7 +141,7 @@ const shouldRenderRequestBody = computed(
 <template>
   <div
     v-if="requestBody && shouldRenderRequestBody"
-    aria-label="Request Body"
+    :aria-label="translate('operation.requestBody')"
     class="request-body"
     role="group">
     <div class="request-body-header">
@@ -151,7 +168,7 @@ const shouldRenderRequestBody = computed(
         <div
           v-if="requestBody.required"
           class="request-body-required">
-          required
+          {{ translate('common.required') }}
         </div>
         <ContentTypeSelect
           v-model="selectedContentType"
@@ -173,12 +190,14 @@ const shouldRenderRequestBody = computed(
         compact
         :compositionPath="['requestBody']"
         :eventBus="eventBus"
-        name="Request Body"
+        :name="translate('operation.requestBody')"
         noncollapsible
         :options="{
           hideReadOnly: true,
           orderRequiredPropertiesFirst: options.orderRequiredPropertiesFirst,
           orderSchemaPropertiesBy: options.orderSchemaPropertiesBy,
+          expandAllSchemaProperties: options.expandAllSchemaProperties,
+          document,
         }"
         :schema="partitionedSchema.visibleProperties"
         schemaContext="requestBody" />
@@ -190,11 +209,13 @@ const shouldRenderRequestBody = computed(
         :compositionPath="['requestBody']"
         :eventBus="eventBus"
         hideDescription
-        name="Request Body"
+        :name="translate('operation.requestBody')"
         :options="{
           hideReadOnly: true,
           orderRequiredPropertiesFirst: options.orderRequiredPropertiesFirst,
           orderSchemaPropertiesBy: options.orderSchemaPropertiesBy,
+          expandAllSchemaProperties: options.expandAllSchemaProperties,
+          document,
         }"
         :schema="partitionedSchema.collapsedProperties"
         schemaContext="requestBody" />
@@ -210,12 +231,14 @@ const shouldRenderRequestBody = computed(
         :compositionPath="['requestBody']"
         :eventBus="eventBus"
         :hideReadOnly="true"
-        name="Request Body"
+        :name="translate('operation.requestBody')"
         noncollapsible
         :options="{
           hideReadOnly: true,
           orderRequiredPropertiesFirst: options.orderRequiredPropertiesFirst,
           orderSchemaPropertiesBy: options.orderSchemaPropertiesBy,
+          expandAllSchemaProperties: options.expandAllSchemaProperties,
+          document,
         }"
         :schema="schema"
         schemaContext="requestBody" />

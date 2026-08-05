@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useLoadingState } from '@scalar/components'
+import { useLoadingState } from '@scalar/components/loading'
 import { isValidUrl } from '@scalar/helpers/url/is-valid-url'
 import { ScalarIconArrowUpRight } from '@scalar/icons'
 import type { ExternalUrls } from '@scalar/types/api-reference'
@@ -8,6 +8,7 @@ import { useToasts } from '@scalar/use-toasts'
 import type { WorkspaceStore } from '@scalar/workspace-store/client'
 import { nextTick } from 'vue'
 
+import { useLocalization } from '@/features/localization'
 import { uploadTempDocument } from '@/helpers/upload-temp-document'
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const props = defineProps<{
 }>()
 
 const { copyToClipboard } = useClipboard()
+const { translate } = useLocalization()
 
 const { toast } = useToasts()
 
@@ -53,7 +55,7 @@ async function generateRegisterLink() {
   const document = props.workspace.exportActiveDocument('json')
 
   if (!document) {
-    toast('Unable to export active document', 'error')
+    toast(translate('developerTools.unableToExportDocument'), 'error')
     await loader.invalidate()
     return
   }
@@ -68,7 +70,9 @@ async function generateRegisterLink() {
     await loader.clear()
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : 'An unknown error occurred'
+      error instanceof Error
+        ? error.message
+        : translate('developerTools.unknownError')
     toast(message, 'error')
     await loader.invalidate()
   }
@@ -86,12 +90,19 @@ function openRegisterLink(documentUrl: string) {
 
 <template>
   <div class="scalar-mcp-layer">
-    <a
+    <!--
+      When there is no MCP config yet these act as buttons that generate one.
+      Using <a href=""> (or undefined href) fails axe link-name; keep a real
+      link only when we already have a target URL.
+    -->
+    <component
+      :is="hasConfig ? 'a' : 'button'"
       class="scalar-mcp-layer-link"
       :href="hasConfig ? vscodeLink : undefined"
       :target="hasConfig ? '_blank' : undefined"
+      :type="hasConfig ? undefined : 'button'"
       @click="
-        (e) => {
+        (e: MouseEvent) => {
           if (!hasConfig) {
             e.preventDefault()
             generateRegisterLink()
@@ -110,13 +121,15 @@ function openRegisterLink(documentUrl: string) {
       </svg>
       VS Code
       <ScalarIconArrowUpRight class="mcp-nav ml-auto size-4" />
-    </a>
-    <a
+    </component>
+    <component
+      :is="hasConfig ? 'a' : 'button'"
       class="scalar-mcp-layer-link"
       :href="hasConfig ? cursorLink : undefined"
       :target="hasConfig ? '_blank' : undefined"
+      :type="hasConfig ? undefined : 'button'"
       @click="
-        (e) => {
+        (e: MouseEvent) => {
           if (!hasConfig) {
             e.preventDefault()
             generateRegisterLink()
@@ -133,7 +146,7 @@ function openRegisterLink(documentUrl: string) {
       </svg>
       Cursor
       <ScalarIconArrowUpRight class="mcp-nav ml-auto size-4" />
-    </a>
+    </component>
     <!-- localhost + you don't have a MCP added -->
     <div
       v-if="!hasConfig"
@@ -162,7 +175,7 @@ function openRegisterLink(documentUrl: string) {
           stroke-linecap="round"
           stroke-width="12" />
       </svg>
-      Generate MCP
+      {{ translate('mcp.generate') }}
       <ScalarIconArrowUpRight class="mcp-nav ml-auto size-4" />
     </div>
     <!-- you do have an MCP added -->
@@ -170,7 +183,7 @@ function openRegisterLink(documentUrl: string) {
       v-else
       class="scalar-mcp-layer-link"
       @click="copyToClipboard(config?.url ?? '')">
-      Connect MCP
+      {{ translate('mcp.connect') }}
       <svg
         class="mcp-logo ml-auto"
         fill="none"
@@ -216,6 +229,8 @@ function openRegisterLink(documentUrl: string) {
   cursor: pointer !important;
 }
 .scalar-mcp-layer .scalar-mcp-layer-link {
+  /* Must stay above font-size and line-height, which the shorthand resets */
+  font: inherit;
   cursor: pointer;
   width: 100%;
   padding: 9px 6px;

@@ -1,15 +1,17 @@
 import { enableConsoleError, enableConsoleWarn } from '@scalar/helpers/testing/console-spies'
 import { apiReferenceConfigurationSchema } from '@scalar/schemas/api-reference'
+import { coerce } from '@scalar/validation'
 import { createWorkspaceStore } from '@scalar/workspace-store/client'
 import { createWorkspaceEventBus } from '@scalar/workspace-store/events'
 import { coerceValue } from '@scalar/workspace-store/schemas/typebox-coerce'
-import { OpenAPIDocumentSchema } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
-import type { WorkspaceDocument } from '@scalar/workspace-store/schemas/workspace'
+import {
+  OpenAPIDocumentSchema,
+  type OpenApiDocument,
+} from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import Operation from './Operation.vue'
-import { coerce } from '@scalar/validation'
 
 type ExtractComponentProps<TComponent> = TComponent extends new () => { $props: infer P } ? P : never
 
@@ -56,6 +58,7 @@ const mountOperationWithConfig = (
     showOperationId: false,
     hideTestRequestButton: false,
     expandAllResponses: false,
+    expandAllSchemaProperties: false,
     orderRequiredPropertiesFirst: false,
     orderSchemaPropertiesBy: 'alpha',
     ...overrides.options,
@@ -75,6 +78,7 @@ const mountOperationWithConfig = (
     authStore: workspaceStore.auth,
     isWebhook: false,
     selectedClient: 'c/fetch',
+    selectedExample: '',
     eventBus,
   }
 
@@ -97,7 +101,7 @@ describe('Operation', () => {
     enableConsoleError()
   })
 
-  const createMockDocument = (): WorkspaceDocument =>
+  const createMockDocument = (): OpenApiDocument =>
     coerceValue(OpenAPIDocumentSchema, {
       openapi: '3.1.0',
       info: {

@@ -1,10 +1,11 @@
-import { useToasts } from '@scalar/use-toasts'
 import { type QueryKey, type UseQueryOptions, useQuery } from '@tanstack/vue-query'
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 
 import { queryClient } from '@/helpers/query-client'
 import { DEFAULT_REFETCH_INTERVAL, scalarClient } from '@/helpers/scalar-client'
 import { useAuth } from '@/hooks/use-auth'
+
+import { useTeams } from './use-teams'
 
 /**
  * Fetches and caches the namespaces the current team can publish into.
@@ -18,29 +19,20 @@ import { useAuth } from '@/hooks/use-auth'
  */
 export const useRegistryNamespaces = (options?: Omit<UseQueryOptions, 'queryKey' | 'queryFn'>) => {
   const { isLoggedIn } = useAuth()
-  const queryKey = ['namespaces'] satisfies QueryKey
-
-  const { toast } = useToasts()
+  const { currentTeamSlug } = useTeams()
+  const queryKey = ['namespaces', currentTeamSlug] satisfies QueryKey
 
   const query = useQuery(
     {
       queryKey,
-      queryFn: () => scalarClient.namespaces.listNamespaces().then((response) => response.strings ?? []),
+      queryFn: () => scalarClient.namespaces.list(),
       enabled: isLoggedIn,
       refetchOnMount: true,
       refetchInterval: DEFAULT_REFETCH_INTERVAL,
+      meta: { errorMessage: 'Failed to fetch namespaces' },
       ...options,
     },
     queryClient,
-  )
-
-  watch(
-    () => query.error.value,
-    (error) => {
-      if (error) {
-        toast('Failed to fetch namespaces', 'error')
-      }
-    },
   )
 
   return {

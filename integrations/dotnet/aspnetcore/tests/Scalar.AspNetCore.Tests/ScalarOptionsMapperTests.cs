@@ -24,6 +24,7 @@ public class ScalarOptionsMapperTests
         configuration.CustomCss.Should().BeNull();
         configuration.SearchHotKey.Should().BeNull();
         configuration.Servers.Should().BeNull();
+        configuration.PluginUrls.Should().BeNull();
         configuration.MetaData.Should().BeNull();
         configuration.DefaultHttpClient.Should().BeNull();
         configuration.HiddenClients.Should().BeNull();
@@ -63,6 +64,7 @@ public class ScalarOptionsMapperTests
             Theme = ScalarTheme.Saturn,
             Layout = ScalarLayout.Classic,
             Servers = [new ScalarServer("https://example.com")],
+            PluginUrls = ["https://example.com/plugin.js"],
             Metadata = new Dictionary<string, string> { ["key"] = "value" },
             DefaultHttpClient = new KeyValuePair<ScalarTarget, ScalarClient>(ScalarTarget.CSharp, ScalarClient.HttpClient),
             HiddenClients = true,
@@ -112,6 +114,7 @@ public class ScalarOptionsMapperTests
         configuration.CustomCss.Should().Be("*{}");
         configuration.SearchHotKey.Should().Be("o");
         configuration.Servers.Should().ContainSingle().Which.Url.Should().Be("https://example.com");
+        configuration.PluginUrls.Should().ContainSingle().Which.Should().Be("https://example.com/plugin.js");
         configuration.MetaData.Should().ContainKey("key").WhoseValue.Should().Be("value");
         configuration.DefaultHttpClient!.TargetKey.Should().Be(ScalarTarget.CSharp);
         configuration.DefaultHttpClient!.ClientKey.Should().Be(ScalarClient.HttpClient);
@@ -323,5 +326,53 @@ public class ScalarOptionsMapperTests
         // Assert
         configuration.Mcp.Should().NotBeNull();
         configuration.Mcp!.Disabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GetSources_ShouldMapAsyncApiDocumentUrl_UsingDefaultPattern()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+        options.AddAsyncApiDocument("events");
+
+        // Act
+        var configuration = options.ToScalarConfiguration();
+
+        // Assert
+        configuration.Sources.Should().ContainSingle()
+            .Which.Url.Should().Be("asyncapi/events.json");
+    }
+
+    [Fact]
+    public void GetSources_ShouldMapAsyncApiDocumentUrl_UsingCustomPattern()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+        options.WithAsyncApiRoutePattern("/api/asyncapi/{documentName}.yaml")
+               .AddAsyncApiDocument("events");
+
+        // Act
+        var configuration = options.ToScalarConfiguration();
+
+        // Assert
+        configuration.Sources.Should().ContainSingle()
+            .Which.Url.Should().Be("api/asyncapi/events.yaml");
+    }
+
+    [Fact]
+    public void GetSources_ShouldIncludeBothOpenApiAndAsyncApiDocuments()
+    {
+        // Arrange
+        var options = new ScalarOptions();
+        options.AddDocument("v1");
+        options.AddAsyncApiDocument("events");
+
+        // Act
+        var configuration = options.ToScalarConfiguration();
+
+        // Assert
+        configuration.Sources.Should().HaveCount(2);
+        configuration.Sources.Should().ContainSingle(s => s.Url == "openapi/v1.json");
+        configuration.Sources.Should().ContainSingle(s => s.Url == "asyncapi/events.json");
     }
 }

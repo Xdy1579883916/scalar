@@ -1,8 +1,24 @@
 export { getExampleFromBody } from './body/get-request-body-example'
 export { getSelectedBodyContentType } from './body/get-selected-body-content-type'
-export { type RequestPayload, buildRequest } from './build-request'
-export { deSerializeParameter } from './header/de-serialize-parameter'
+export {
+  buildDottedNestedRowPredicate,
+  coerceLeafValueToSchemaType,
+  coerceUntypedValue,
+  resolveLeafSchema,
+} from './body/schema-value-coercion'
+export { type SerializedFormProperty, serializeFormPropertyWithEncoding } from './body/serialize-form-property'
+export {
+  BUILD_REQUEST_FAILED,
+  type BuildRequestData,
+  type BuildRequestFailureCode,
+  type BuildRequestResult,
+  type RequestPayload,
+  buildRequest,
+  resolveExecutableRequestUrl,
+} from './build-request'
+export { deSerializeParameter, deSerializeSchemaValue } from './header/de-serialize-parameter'
 export { filterGlobalCookie } from './header/filter-global-cookies'
+export { isParamDisabled } from './header/is-param-disabled'
 export {
   serializeContentValue,
   serializeDeepObjectStyle,
@@ -19,9 +35,19 @@ export { getResolvedUrl } from './helpers/get-resolved-url'
 export { getServerVariables } from './helpers/get-server-variables'
 export type { RequestFactory } from './request-factory'
 export { requestFactory } from './request-factory'
+export {
+  INVALID_REQUEST_FACTORY_URL,
+  MISSING_REQUEST_SERVER_BASE,
+  type ResolveRequestFactoryUrlError,
+  type ResolveRequestFactoryUrlResult,
+  resolveRequestFactoryUrl,
+} from './resolve-request-factory-url'
+export { isEncryptionSchemeType, isSaslSchemeType } from './security/broker-scheme-types'
 export { buildRequestSecurity } from './security/build-request-security'
 export type {
   ApiKeyObjectSecret,
+  EncryptionObjectSecret,
+  GssapiObjectSecret,
   HttpObjectSecret,
   OAuth2ObjectSecret,
   OAuthFlowAuthorizationCodeSecret,
@@ -30,5 +56,7 @@ export type {
   OAuthFlowPasswordSecret,
   OAuthFlowsObjectSecret,
   OpenIdConnectObjectSecret,
+  SaslObjectSecret,
   SecuritySchemeObjectSecret,
+  X509ObjectSecret,
 } from './security/secret-types'

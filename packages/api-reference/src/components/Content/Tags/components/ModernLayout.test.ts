@@ -2,7 +2,7 @@ import { createWorkspaceEventBus } from '@scalar/workspace-store/events'
 import type { TraversedTag } from '@scalar/workspace-store/schemas/navigation'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import ModernLayout from './ModernLayout.vue'
 
@@ -26,7 +26,6 @@ const createMockTag = (overrides: Partial<TraversedTag> = {}): TraversedTag => (
 })
 
 const mockProps = {
-  isLoading: false,
   isCollapsed: false,
   eventBus: null,
 }
@@ -36,6 +35,7 @@ beforeEach(() => {
     getLazyPlaceholderHeight: () => undefined,
     requestLazyRender: vi.fn(),
     setLazyPlaceholderHeight: vi.fn(),
+    scrollTargetId: ref(''),
     useLazyBus: () => ({
       isReady: computed(() => true),
     }),

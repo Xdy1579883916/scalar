@@ -19,7 +19,7 @@
     "testing",
     "react"
   ],
-  "version": "0.8.14",
+  "version": "0.8.33",
   "engines": {
     "node": ">=22"
   },
@@ -34,7 +34,7 @@
     "dist",
     "CHANGELOG.md"
   ],
-  "readme": {
+  "scalarReadme": {
     "title": "Scalar API Reference Plugin for Docusaurus",
     "badges": [
       {
@@ -54,6 +54,7 @@
     }
   },
   "dependencies": {
+    "@scalar/client-side-rendering": "workspace:*",
     "@scalar/types": "workspace:*"
   },
   "devDependencies": {

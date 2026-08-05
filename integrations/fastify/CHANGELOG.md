@@ -1,5 +1,89 @@
 # @scalar/fastify-api-reference
 
+## 1.64.0
+
+## 1.63.0
+
+## 1.62.9
+
+### Patch Changes
+
+- [#9719](https://github.com/scalar/scalar/pull/9719): docs: update the Scalar platform overview block in the README
+
+## 1.62.8
+
+## 1.62.7
+
+### Patch Changes
+
+- [#9710](https://github.com/scalar/scalar/pull/9710): Republish so the updated README (with the Scalar platform overview) reaches npm. Also renames the README generator metadata in package.json from `readme` to `scalarReadme`: npm treats a `readme` field as the readme text itself, so affected packages were published with a literal `[object Object]` readme on the registry instead of README.md.
+
+## 1.62.6
+
+## 1.62.5
+
+## 1.62.4
+
+## 1.62.3
+
+## 1.62.2
+
+## 1.62.1
+
+### Patch Changes
+
+- [#9539](https://github.com/scalar/scalar/pull/9539): Bundle the plugin with Vite and inline the standalone script at build time. The script used to be read from disk at runtime, which broke when the Fastify app was bundled (for example into a Docker image). The output is now self-contained and bundler-safe.
+
+## 1.62.0
+
+## 1.61.0
+
+## 1.60.0
+
+## 1.59.3
+
+## 1.59.2
+
+## 1.59.1
+
+## 1.59.0
+
+### Minor Changes
+
+- [#9422](https://github.com/scalar/scalar/pull/9422): Add a `nonce` option for Content Security Policy support.
+
+  When you pass a `nonce`, the rendered HTML stamps it onto the inline `<script>` and the CDN `<script>` tag (and Scalar's own `<style>` tags, plus a matching `<meta property="csp-nonce">`). This lets the API Reference run under a strict `script-src` with no `unsafe-inline` and no `unsafe-eval`.
+
+  ```ts
+  ApiReference({
+    url: '/openapi.json',
+    // Match this value in your `script-src` CSP directive.
+    nonce: 'r4nd0m',
+  })
+  ```
+
+  Note: `style-src` still needs `'unsafe-inline'`. The reference renders inline `style="…"` attributes, which a CSP nonce can never authorize (nonces only apply to `<script>`, `<style>` and `<link>` elements), so a nonce-only `style-src` is not possible. The win is a fully strict `script-src`.
+
+## 1.58.0
+
+### Patch Changes
+
+- [#9209](https://github.com/scalar/scalar/pull/9209): Fix intermittent TypeScript error when hook handlers are spread into route options. Annotating the internal `schemaToHideRoute` constant as `FastifySchema` prevents TypeScript from narrowing its type to `{ hide: boolean }`, which caused incompatible hook-handler types with Fastify 5's `NoInfer<SchemaCompiler>`-based route definitions.
+
+## 1.57.5
+
+## 1.57.4
+
+## 1.57.3
+
+## 1.57.2
+
+## 1.57.1
+
+## 1.57.0
+
+## 1.56.0
+
 ## 1.55.3
 
 ## 1.55.2

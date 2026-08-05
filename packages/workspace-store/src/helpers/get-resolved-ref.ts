@@ -1,8 +1,21 @@
-export type RefNode<Node> = Partial<Node> & { $ref: string; '$ref-value': Node }
+export type RefNode<Node> = Partial<Node> & { $ref: string; '$ref-value'?: Node }
 export type NodeInput<Node> = Node | RefNode<Node>
 
 const defaultTransform = <Node>(node: RefNode<Node>) => {
-  return node['$ref-value']
+  // `$ref-value` is populated by the bundler/proxy when the document is resolved. The schemas now
+  // type it as optional so unresolved `{ $ref }` objects pass through coercion untouched, but callers
+  // of `getResolvedRef` operate on resolved documents where the value is present.
+  return node['$ref-value'] as Node
+}
+
+/**
+ * Transform for getResolvedRef that merges sibling properties of a $ref wrapper
+ * onto the dereferenced value. Wrapper siblings take precedence over the resolved value,
+ * which matches OpenAPI 3.1 semantics where annotations alongside $ref override the target.
+ */
+export const mergeSiblingReferences = <Node>(node: RefNode<Node>): Node => {
+  const { '$ref-value': value, ...rest } = node
+  return { ...value, ...rest } as Node
 }
 
 /**
